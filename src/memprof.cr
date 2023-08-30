@@ -103,8 +103,9 @@ module MemProf
   def self.track(ptr : Void*, size : UInt64) : Void* forall T
     if running?
       stopping do
-        stack = Exception::CallStack.unwind(STACK_TOTAL)
-        key = StaticArray(UInt64, STACK_DEPTH).new { |i| stack[STACK_SKIP + i]?.try(&.address) || 0_u64 }
+        stack = StaticArray(Void*, STACK_TOTAL).new(Pointer(Void).null)
+        Exception::CallStack.unwind_to(stack.to_slice)
+        key = StaticArray(UInt64, STACK_DEPTH).new { |i| stack.unsafe_fetch(STACK_SKIP).address }
         alloc_infos[ptr.address] = AllocInfo.new(size, key)
       end
     end
@@ -225,19 +226,19 @@ struct Exception::CallStack
   end
 
   {% if flag?(:interpreted) %} @[Primitive(:interpreter_call_stack_unwind)] {% end %}
-  def self.unwind(limit : Int32) : Array(Void*)
-    callstack = {limit, Array(Void*).new(limit)}
+  def self.unwind_to(buf : Slice(Void*)) : Nil
+    callstack = {buf.to_unsafe, buf.to_unsafe + buf.size}
     backtrace_fn = ->(context : LibUnwind::Context, data : Void*) do
-      bt = data.as(typeof(pointerof(callstack)))
-      return LibUnwind::ReasonCode::END_OF_STACK if bt.value[0] <= 0
-      bt.value = {bt.value[0] &- 1, bt.value[1]}
+      b, e = data.as({Void**, Void**}*).value
+      return LibUnwind::ReasonCode::END_OF_STACK if b >= e
+      data.as({Void**, Void**}*).value = {b + 1, e}
 
       ip = {% if flag?(:arm) %}
              Pointer(Void).new(__crystal_unwind_get_ip(context))
            {% else %}
              Pointer(Void).new(LibUnwind.get_ip(context))
            {% end %}
-      bt.value[1] << ip
+      b.value = ip
 
       {% if flag?(:gnu) && flag?(:i386) %}
         # This is a workaround for glibc bug: https://sourceware.org/bugzilla/show_bug.cgi?id=18635
@@ -252,6 +253,5 @@ struct Exception::CallStack
     end
 
     LibUnwind.backtrace(backtrace_fn, pointerof(callstack).as(Void*))
-    callstack[1]
   end
 end
