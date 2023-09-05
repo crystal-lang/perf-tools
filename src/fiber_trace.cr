@@ -22,37 +22,39 @@ class Fiber
   end
 
   # crystal-lang/crystal#13701
-  def run
-    GC.unlock_read
-    @proc.call
-  rescue ex
-    if name = @name
-      STDERR.print "Unhandled exception in spawn(name: #{name}): "
-    else
-      STDERR.print "Unhandled exception in spawn: "
+  {% if compare_versions(Crystal::VERSION, "1.10.0") < 0 %}
+    def run
+      GC.unlock_read
+      @proc.call
+    rescue ex
+      if name = @name
+        STDERR.print "Unhandled exception in spawn(name: #{name}): "
+      else
+        STDERR.print "Unhandled exception in spawn: "
+      end
+      ex.inspect_with_backtrace(STDERR)
+      STDERR.flush
+    ensure
+      {% if flag?(:preview_mt) %}
+        Crystal::Scheduler.enqueue_free_stack @stack
+      {% elsif flag?(:interpreted) %}
+        # For interpreted mode we don't need a new stack, the stack is held by the interpreter
+      {% else %}
+        Fiber.stack_pool.release(@stack)
+      {% end %}
+
+      # Remove the current fiber from the linked list
+      Fiber.inactive(self)
+
+      # Delete the resume event if it was used by `yield` or `sleep`
+      @resume_event.try &.free
+      @timeout_event.try &.free
+      @timeout_select_action = nil
+
+      @alive = false
+      Crystal::Scheduler.reschedule
     end
-    ex.inspect_with_backtrace(STDERR)
-    STDERR.flush
-  ensure
-    {% if flag?(:preview_mt) %}
-      Crystal::Scheduler.enqueue_free_stack @stack
-    {% elsif flag?(:interpreted) %}
-      # For interpreted mode we don't need a new stack, the stack is held by the interpreter
-    {% else %}
-      Fiber.stack_pool.release(@stack)
-    {% end %}
-
-    # Remove the current fiber from the linked list
-    Fiber.inactive(self)
-
-    # Delete the resume event if it was used by `yield` or `sleep`
-    @resume_event.try &.free
-    @timeout_event.try &.free
-    @timeout_select_action = nil
-
-    @alive = false
-    Crystal::Scheduler.reschedule
-  end
+  {% end %}
 
   def self.print_stacks(io : IO) : Nil
     # The top 3 spawn frames are:
