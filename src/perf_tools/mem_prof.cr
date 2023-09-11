@@ -1,4 +1,4 @@
-require "./perf_tools/common"
+require "./common"
 
 # A simple in-memory memory profiler that tracks all allocations and
 # deallocations by the garbage-collecting allocator.
@@ -11,7 +11,7 @@ require "./perf_tools/common"
 # a table of all allocated objects to the given `IO`:
 #
 # ```
-# require "memprof"
+# require "perf_tools/mem_prof"
 #
 # class Foo
 # end
@@ -60,7 +60,7 @@ require "./perf_tools/common"
 # the same process as the program being profiled. The amount of additional
 # memory is proportional to the number of live allocations and
 # `MemProf::STACK_DEPTH`.
-module MemProf
+module PerfTools::MemProf
   # :nodoc:
   class_property? running = true
 
@@ -367,17 +367,17 @@ module MemProf
   # The first line contains the number of lines that follow. After that, each
   # line includes the allocation count, the total byte size of the allocations,
   # then the call stack, separated by `\t`s. The lines do not assume any
-  # particular order. Example output:
+  # particular order. Example output: (`MIN_BYTES == 150`)
   #
   # ```text
   # 7
-  # 1       256     src/memprof.cr:118:5 in 'allocate'      /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/file_descriptor.cr:21:3 in 'new'        /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/file_descriptor.cr:191:5 in 'from_stdio'      /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/file_descriptor.cr:40:5 in 'from_stdio'        /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/kernel.cr:25:10 in '~STDOUT:init'
-  # 1       256     src/memprof.cr:118:5 in 'allocate'      /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/file_descriptor.cr:21:3 in 'new'        /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/file_descriptor.cr:191:5 in 'from_stdio'      /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/file_descriptor.cr:40:5 in 'from_stdio'        /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/kernel.cr:42:10 in '~STDERR:init'
-  # 1       152     src/memprof.cr:118:5 in 'allocate'      /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/fiber.cr:88:3 in 'new'     /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/concurrent.cr:61:3 in 'spawn:name'        /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/kernel.cr:558:1 in '__crystal_main'        /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:129:5 in 'main_user_code'
-  # 1       152     src/memprof.cr:118:5 in 'allocate'      /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/fiber.cr:125:3 in 'new'    /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/pthread.cr:42:19 in 'initialize'      /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/pthread.cr:39:3 in 'new'     /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/pthread.cr:62:3 in 'current'
-  # 1       152     src/memprof.cr:118:5 in 'allocate'      /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/fiber.cr:88:3 in 'new'     /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/concurrent.cr:61:3 in 'spawn:name'        /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/signal.cr:60:5 in 'start_loop' /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/signal.cr:163:5 in 'setup_default_handlers'
-  # 1       256     src/memprof.cr:118:5 in 'allocate'      /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/file_descriptor.cr:21:3 in 'new'        /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/file_descriptor.cr:158:9 in 'pipe'    /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io.cr:141:5 in 'pipe'      /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/signal.cr:15:12 in '~Crystal::System::Signal::pipe:init'
-  # 1       256     src/memprof.cr:118:5 in 'allocate'      /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/file_descriptor.cr:21:3 in 'new'        /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/file_descriptor.cr:159:9 in 'pipe'    /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io.cr:141:5 in 'pipe'      /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/signal.cr:15:12 in '~Crystal::System::Signal::pipe:init'
+  # 1       256     /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/file_descriptor.cr:21:3 in 'new'        /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/file_descriptor.cr:191:5 in 'from_stdio'      /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/file_descriptor.cr:40:5 in 'from_stdio' /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/kernel.cr:25:10 in '~STDOUT:init' /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/kernel.cr:25:1 in '__crystal_main'
+  # 1       256     /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/file_descriptor.cr:21:3 in 'new'        /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/file_descriptor.cr:191:5 in 'from_stdio'      /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/file_descriptor.cr:40:5 in 'from_stdio' /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/kernel.cr:42:10 in '~STDERR:init' /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/once.cr:25:54 in 'once'
+  # 1       152     /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/fiber.cr:88:3 in 'new'     /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/concurrent.cr:61:3 in 'spawn:name'        /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/kernel.cr:558:1 in '__crystal_main'        /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:129:5 in 'main_user_code' /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:115:7 in 'main'
+  # 1       152     /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/fiber.cr:125:3 in 'new'    /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/pthread.cr:42:19 in 'initialize'      /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/pthread.cr:39:3 in 'new'       /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/pthread.cr:62:3 in 'current'  /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/scheduler.cr:26:5 in 'enqueue'
+  # 1       152     /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/fiber.cr:88:3 in 'new'     /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/concurrent.cr:61:3 in 'spawn:name'        /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/signal.cr:60:5 in 'start_loop' /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/signal.cr:163:5 in 'setup_default_handlers'   /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/kernel.cr:558:1 in '__crystal_main'
+  # 1       256     /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/file_descriptor.cr:21:3 in 'new'        /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/file_descriptor.cr:158:9 in 'pipe'    /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io.cr:141:5 in 'pipe'      /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/signal.cr:15:12 in '~Crystal::System::Signal::pipe:init'      /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/once.cr:25:54 in 'once'
+  # 1       256     /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/file_descriptor.cr:21:3 in 'new'        /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/file_descriptor.cr:159:9 in 'pipe'    /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io.cr:141:5 in 'pipe'      /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/signal.cr:15:12 in '~Crystal::System::Signal::pipe:init'      /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/once.cr:25:54 in 'once'
   # ```
   def self.log_allocations(io : IO) : Nil
     GC.collect
@@ -410,7 +410,7 @@ module MemProf
   # `STACK_SKIP`, and `MIN_BYTES` constants.
   #
   # The rows are sorted by each group's total size, then by allocation count,
-  # and finally by the call stacks. Example output:
+  # and finally by the call stacks. Example output: (`MIN_BYTES == 150`)
   #
   # ```text
   # | Allocations | Total size | Context |
@@ -473,9 +473,9 @@ module MemProf
       0,
     )
 
-    {% if PRINT_AT_EXIT %}
+    if PRINT_AT_EXIT
       at_exit { log_allocations(STDERR) }
-    {% end %}
+    end
   end
 
   init
@@ -491,23 +491,23 @@ end
 module GC
   # :nodoc:
   def self.malloc(size : LibC::SizeT) : Void*
-    MemProf.track(previous_def, size.to_u64, false)
+    PerfTools::MemProf.track(previous_def, size.to_u64, false)
   end
 
   # :nodoc:
   def self.malloc_atomic(size : LibC::SizeT) : Void*
-    MemProf.track(previous_def, size.to_u64, true)
+    PerfTools::MemProf.track(previous_def, size.to_u64, true)
   end
 
   # :nodoc:
   def self.realloc(ptr : Void*, size : LibC::SizeT) : Void*
-    was_atomic = MemProf.untrack(ptr)
-    MemProf.track(previous_def, size.to_u64, was_atomic)
+    was_atomic = PerfTools::MemProf.untrack(ptr)
+    PerfTools::MemProf.track(previous_def, size.to_u64, was_atomic)
   end
 
   # :nodoc:
   def self.free(pointer : Void*) : Nil
-    MemProf.untrack(pointer)
+    PerfTools::MemProf.untrack(pointer)
     previous_def
   end
 end
@@ -519,7 +519,7 @@ end
       class {{ type }}
         # :nodoc:
         def self.allocate
-          MemProf.set_type(self) { previous_def }
+          PerfTools::MemProf.set_type(self) { previous_def }
         end
       end
     {% end %}
@@ -530,7 +530,7 @@ class Reference
   macro inherited
     # :nodoc:
     def self.allocate
-      MemProf.set_type(self) { previous_def }
+      PerfTools::MemProf.set_type(self) { previous_def }
     end
   end
 end
