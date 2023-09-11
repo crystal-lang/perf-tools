@@ -1,11 +1,3 @@
-# This file defines a new function, `Fiber.print_stacks(IO)`, that writes a
-# table of all fiber stacks to the given `IO`.
-#
-# The table includes the call stack up to the fiber's creation, as well as the
-# call stack up to the fiber's last yield, if any. Fibers are grouped by their
-# spawn / yield stacks and counted separately. The main fiber of each thread is
-# not shown yet.
-
 require "./common"
 
 module PerfTools::FiberTrace
@@ -16,19 +8,38 @@ module PerfTools::FiberTrace
   class_getter yield_stack = {} of Fiber => Array(String)
 
   {% begin %}
+    # :nodoc:
+    # TODO: support
     STACK_DEPTH = {{ (env("FIBERTRACE_STACK_DEPTH") || "5").to_i }}
 
-    STACK_SKIP = {{ (env("FIBERTRACE_STACK_SKIP") || "4").to_i }}
+    # :nodoc:
+    # TODO: support
+    STACK_SKIP_NEW = {{ (env("FIBERTRACE_STACK_SKIP_NEW") || "4").to_i }}
+
+    # :nodoc:
+    # TODO: support
+    STACK_SKIP_YIELD = {{ (env("FIBERTRACE_STACK_SKIP_YIELD") || "4").to_i }}
   {% end %}
 
-  def self.print_stacks(io : IO) : Nil
+  # Logs all existing fibers, aggregated by the call stacks at their creation
+  # and last yield, to the given *io* as a Markdown table.
+  #
+  # Example output:
+  #
+  # ```text
+  # | Count | Fibers | Spawn stack | Yield stack |
+  # |------:|:-------|:------------|:------------|
+  # | 1 | ` Signal Loop ` | ` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/signal.cr:60:5 in 'start_loop' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/signal.cr:163:5 in 'setup_default_handlers' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/kernel.cr:558:1 in '__crystal_main' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:129:5 in 'main_user_code' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:115:7 in 'main' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:141:3 in 'main' ` | ` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/scheduler.cr:50:5 in 'reschedule' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/evented.cr:128:5 in 'wait_readable' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/evented.cr:119:3 in 'wait_readable' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/evented.cr:59:9 in 'unbuffered_read' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/buffered.cr:261:5 in 'fill_buffer' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/buffered.cr:82:9 in 'read' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io.cr:540:7 in 'read_fully?' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io.cr:523:5 in 'read_fully' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/byte_format.cr:123:3 in 'decode' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/int.cr:781:5 in 'from_io' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io.cr:916:5 in 'read_bytes' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/signal.cr:62:17 in '->' `<br>` src/perf_tools/fiber_trace.cr:98:3 in 'run' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/fiber.cr:98:34 in '->' ` |
+  # | 1 | ` Fiber Clean Loop ` | ` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/kernel.cr:558:1 in '__crystal_main' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:129:5 in 'main_user_code' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:115:7 in 'main' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:141:3 in 'main' ` | ` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/scheduler.cr:174:5 in 'sleep' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/scheduler.cr:58:5 in 'sleep' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/concurrent.cr:14:3 in 'sleep' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/kernel.cr:558:1 in '->' `<br>` src/perf_tools/fiber_trace.cr:98:3 in 'run' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/fiber.cr:98:34 in '->' ` |
+  # ```
+  def self.pretty_log_fibers(io : IO) : Nil
     # The top 3 spawn frames are:
     #
     # * the redefined `Fiber#initialize`
     # * `Fiber.new`
     # * the redefined `spawn`
     #
-    # The top 4 yield framse are:
+    # The top 4 yield frames are:
     #
     # * the redefined `Crystal::Scheduler#resume`
     # * `Crystal::Scheduler.resume`
@@ -36,6 +47,7 @@ module PerfTools::FiberTrace
     # * `Crystal::Scheduler#reschedule`
     #
     # To reduce bloat we skip those frames when grouping the fiber records.
+    # TODO: make these customizable using the constants above
 
     uniqs = spawn_stack
       .map { |fiber, stack| {fiber.name, stack, yield_stack[fiber]?} }
