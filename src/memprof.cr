@@ -6,9 +6,9 @@ require "./perf_tools/common"
 # Only Linux is supported at the moment.
 #
 # To use the profiler, simply require this file in your project. By default, the
-# profiler is enabled at program startup and does nothing else,
-# `MemProf.log(io : IO)` should be called regularly to print a table of all
-# allocated objects to the given `IO`:
+# profiler is enabled at program startup and does nothing else.
+# `MemProf.pretty_log_allocations(io : IO)` should be called regularly to print
+# a table of all allocated objects to the given `IO`:
 #
 # ```
 # require "memprof"
@@ -25,19 +25,9 @@ require "./perf_tools/common"
 # ```text
 # | Allocations | Total size | Context |
 # |------------:|-----------:|---------|
-# |       1 | 800,000 | `src/primitives.cr:164:3 in 'malloc'`<br>`src/array.cr:122:17 in 'initialize'`<br>`src/array.cr:112:3 in 'new'`<br>`src/array.cr:183:5 in '__crystal_main'`<br>`src/crystal/main.cr:129:5 in 'main_user_code'` |
-# | 100,000 | 400,000 | `src/primitives.cr:36:1 in 'new'`<br>`usr/test.cr:6:27 in '__crystal_main'`<br>`src/crystal/main.cr:129:5 in 'main_user_code'`<br>`src/crystal/main.cr:115:7 in 'main'`<br>`src/crystal/main.cr:141:3 in 'main'` |
+# |       1 | 800,000 | `/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/array.cr:122:17 in 'initialize'`<br>`/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/array.cr:112:3 in 'new'`<br>`/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/array.cr:183:5 in '__crystal_main'`<br>`/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:129:5 in 'main_user_code'`<br>`/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:115:7 in 'main'` |
+# | 100,000 | 400,000 | `/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/primitives.cr:36:1 in 'new'`<br>`usr/test.cr:6:27 in '__crystal_main'`<br>`/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:129:5 in 'main_user_code'`<br>`/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:115:7 in 'main'`<br>`/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:141:3 in 'main'` |
 # ```
-#
-# The `Allocations` column shows the total number of live objects, which is the
-# number of allocations minus the number of deallocations, including those from
-# garbage collection events.
-#
-# The `Total size` column shows the total byte size of all live allocations.
-#
-# The `Context` column shows the top of the call stack that produced the
-# allocations on a given row. All allocations are grouped by this call stack,
-# then sorted in descending order by total sizes.
 #
 # We could continue this example by truncating the array and printing the stats
 # again:
@@ -50,62 +40,84 @@ require "./perf_tools/common"
 # ```text
 # | Allocations | Total size | Context |
 # |------------:|-----------:|---------|
-# |     1 | 800,000 | `src/primitives.cr:164:3 in 'malloc'`<br>`src/array.cr:122:17 in 'initialize'`<br>`src/array.cr:112:3 in 'new'`<br>`src/array.cr:183:5 in '__crystal_main'`<br>`src/crystal/main.cr:129:5 in 'main_user_code'` |
-# | 1,184 |   4,736 | `src/primitives.cr:36:1 in 'new'`<br>`usr/test.cr:6:27 in '__crystal_main'`<br>`src/crystal/main.cr:129:5 in 'main_user_code'`<br>`src/crystal/main.cr:115:7 in 'main'`<br>`src/crystal/main.cr:141:3 in 'main'` |
+# |     1 | 800,000 | `/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/array.cr:122:17 in 'initialize'`<br>`/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/array.cr:112:3 in 'new'`<br>`/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/array.cr:183:5 in '__crystal_main'`<br>`/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:129:5 in 'main_user_code'`<br>`/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:115:7 in 'main'` |
+# | 1,184 |   4,736 | `/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/primitives.cr:36:1 in 'new'`<br>`usr/test.cr:6:27 in '__crystal_main'`<br>`/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:129:5 in 'main_user_code'`<br>`/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:115:7 in 'main'`<br>`/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:141:3 in 'main'` |
 # ```
 #
 # Observe that most of the leaked `Foo`s have been freed. The exact number of
 # remaining allocations may change because the Boehm GC is non-deterministic.
-# Note that `MemProf.log` will automatically call `GC.collect` before printing.
 #
-# Several build-time environment variables can configure the behavior of the
-# memory profiler:
+# `MemProf.log_allocations(io : IO)` could be used instead for a more
+# machine-readable output format. Additionally,
+# `MemProf.log_object_counts(io : IO)` and `MemProf.log_object_sizes(io : IO)`
+# are available to tally the counts and heap sizes of all live objects of most
+# reference types.
 #
-# * `MEMPROF_STACK_DEPTH`: Controls the number of stack frames to use in the
-#   `Context` column. (Default `5`)
-# * `MEMPROF_STACK_SKIP`: When obtaining a call stack, the top of the call stack
-#   will always be profiling functions themselves, followed by the allocation
-#   functions themselves. These provide little useful information, so they are
-#   skipped by default. This environment variable controls the number of stack
-#   frames to skip; there is usually no reason to alter this. (Default `4`)
-# * `MEMPROF_MIN_BYTES`: Controls the minimum total size in bytes for which an
-#   allocation group is shown. This can be used to hide small objects that are
-#   only allocated very few times, e.g. constants. (Default `1024`)
-# * `MEMPROF_PRINT_AT_EXIT`: If set to `1`, prints all memory stats to the
-#   error stream upon normal program exit, by `at_exit { MemProf.log(STDERR) }`.
+# All logging methods in this module will automatically call `GC.collect` before
+# printing.
 #
 # NOTE: As an in-memory profiler, `MemProf` will consume additional memory in
 # the same process as the program being profiled. The amount of additional
 # memory is proportional to the number of live allocations and
-# `MEMPROF_STACK_DEPTH`.
+# `MemProf::STACK_DEPTH`.
 module MemProf
+  # :nodoc:
   class_property? running = true
 
   {% begin %}
+    # The maximum number of stack frames shown for `MemProf.log_allocations` and
+    # `MemProf.pretty_log_allocations`.
+    #
+    # Configurable at build time using the `MEMPROF_STACK_DEPTH` environment
+    # variable.
     STACK_DEPTH = {{ (env("MEMPROF_STACK_DEPTH") || "5").to_i }}
 
-    STACK_SKIP = {{ (env("MEMPROF_STACK_SKIP") || "4").to_i }}
+    # When obtaining a call stack, the top of the call stack will always be the
+    # profiling functions themselves, followed by the allocation functions
+    # themselves. These provide little useful information, so they are skipped
+    # by default. This constant controls the number of stack frames to skip;
+    # there is usually no reason to alter this.
+    #
+    # Configurable at build time using the `MEMPROF_STACK_SKIP` environment
+    # variable.
+    STACK_SKIP = {{ (env("MEMPROF_STACK_SKIP") || "5").to_i }}
 
+    # The minimum total byte size below which an allocation group is hidden for
+    # `MemProf.log_allocations` and `MemProf.pretty_log_allocations`. This can
+    # be used to hide small objects that are only allocated very few times, e.g.
+    # constants.
+    #
+    # Configurable at build time using the `MEMPROF_MIN_BYTES` environment
+    # variable.
     MIN_BYTES = {{ (env("MEMPROF_MIN_BYTES") || "1024").to_i }}
 
+    # If set to `1`, logs all allocations to the standard error stream upon
+    # normal program exit, via `at_exit { MemProf.log_allocations(STDERR) }`.
+    #
+    # Configurable at build time using the `MEMPROF_PRINT_AT_EXIT` environment
+    # variable.
     PRINT_AT_EXIT = {{ env("MEMPROF_PRINT_AT_EXIT") == "1" }}
   {% end %}
 
   {% begin %}
+    # :nodoc:
     STACK_TOTAL = {{ STACK_DEPTH + STACK_SKIP }}
   {% end %}
 
   # must be UInt64 so that `Key` itself is allocated atomically
   private record AllocInfo, size : UInt64, key : StaticArray(UInt64, STACK_DEPTH), type_id : Int32, atomic : Bool
 
+  # :nodoc:
   class_getter alloc_infos : Hash(UInt64, AllocInfo) do
     stopping { Hash(UInt64, AllocInfo).new }
   end
 
+  # :nodoc:
   class_getter obj_counts : Hash(Int32, UInt64) do
     {} of Int32 => UInt64
   end
 
+  # :nodoc:
   class_getter known_classes : Hash(Int32, String) do
     {} of Int32 => String
   end
@@ -113,12 +125,14 @@ module MemProf
   @@last_type_id = 0
   @@last_type_name : String?
 
+  # :nodoc:
   def self.set_type(type : T.class, &) forall T
     @@last_type_id = T.crystal_instance_type_id
     @@last_type_name = T.name
     yield
   end
 
+  # :nodoc:
   def self.track(ptr : Void*, size : UInt64, atomic : Bool) : Void* forall T
     if running?
       stopping do
@@ -137,6 +151,7 @@ module MemProf
     ptr
   end
 
+  # :nodoc:
   def self.untrack(ptr : Void*) : Bool forall T
     if running?
       stopping do
@@ -149,7 +164,7 @@ module MemProf
     false
   end
 
-  def self.stopping(&)
+  private def self.stopping(&)
     if @@running
       @@running = false
       gc_enabled = LibGC.is_disabled == 0
@@ -165,6 +180,35 @@ module MemProf
     end
   end
 
+  # Logs the numbers of known live reference objects, aggregated by their types,
+  # to the given *io*.
+  #
+  # The first line contains the number of lines that follow. After that, each
+  # line includes the object count, then a `\t`, then the type name for those
+  # objects. The lines do not assume any particular order. Example output:
+  #
+  # ```text
+  # 19
+  # 4       IO::FileDescriptor
+  # 8       Hash(Thread, Deque(Fiber))
+  # 20      Crystal::SpinLock
+  # 8       Hash(Thread, Crystal::EventLoop::Event)
+  # 3       Fiber
+  # 1       Thread::LinkedList(Fiber)
+  # 1       Thread
+  # 1       Thread::LinkedList(Thread)
+  # 1       Crystal::Scheduler
+  # 1       Crystal::LibEvent::EventLoop
+  # 3       Deque(Fiber)
+  # 2       Mutex
+  # 1       Hash(Signal, Proc(Signal, Nil))
+  # 1       Hash(Tuple(UInt64, Symbol), Bool)
+  # 1       Hash(UInt64, UInt64)
+  # 1       Hash(Thread, Pointer(LibPCRE2::JITStack))
+  # 1       Hash(Int32, Int32)
+  # 1       Hash(Int32, Channel(Int32))
+  # 1       Hash(String, NamedTuple(time: Time, location: Time::Location))
+  # ```
   def self.log_object_counts(io : IO) : Nil
     GC.collect
     stopping do
@@ -181,6 +225,55 @@ module MemProf
     end
   end
 
+  # Logs the total sizes of known live reference objects, aggregated by their
+  # types, to the given *io*.
+  #
+  # The "size" of an object includes the space it occupies on the heap. If the
+  # object was not allocated using `GC.malloc_atomic`, then its "size" also
+  # includes, recursively, the "sizes" of its reference-type instance variables,
+  # except that the same space is never counted more than once.
+  #
+  # The "total size" of a reference type is then the total "sizes" of all of its
+  # live objects, except again that the same heap space is never counted more
+  # than once. Alternatively it is the total number of heap bytes transitively
+  # reachable from all live objects via pointers.
+  #
+  # The first line contains the number of lines that follow. After that, each
+  # line includes the total size, then a `\t`, then the type name for those
+  # objects. The lines do not assume any particular order. Example output:
+  #
+  # ```text
+  # 26
+  # 4       (class 88)
+  # 216     (class 131)
+  # 80      Crystal::SpinLock
+  # 16      (class 87)
+  # 24      (class 20)
+  # 72      (class 4)
+  # 24      (class 137)
+  # 24      (class 157)
+  # 1984    IO::FileDescriptor
+  # 448     Hash(Thread, Deque(Fiber))
+  # 448     Hash(Thread, Crystal::EventLoop::Event)
+  # 600     Fiber
+  # 704     Thread::LinkedList(Fiber)
+  # 600     Thread
+  # 400     Thread::LinkedList(Thread)
+  # 652     Crystal::Scheduler
+  # 24      Crystal::LibEvent::EventLoop
+  # 560     Deque(Fiber)
+  # 168     Mutex
+  # 152     Hash(Signal, Proc(Signal, Nil))
+  # 56      Hash(Tuple(UInt64, Symbol), Bool)
+  # 56      Hash(UInt64, UInt64)
+  # 56      Hash(Thread, Pointer(LibPCRE2::JITStack))
+  # 56      Hash(Int32, Int32)
+  # 56      Hash(Int32, Channel(Int32))
+  # 56      Hash(String, NamedTuple(time: Time, location: Time::Location))
+  # ```
+  #
+  # NOTE: Some classes do not have their names known. This affects only a small
+  # number of types in the standard library runtime.
   def self.log_object_sizes(io : IO) : Nil
     GC.collect
     stopping do
@@ -265,6 +358,27 @@ module MemProf
     end
   end
 
+  # Logs the total sizes of known live allocations, aggregated by their call
+  # stacks, to the given *io*.
+  #
+  # The behavior of this method can be controlled by the `STACK_DEPTH`,
+  # `STACK_SKIP`, and `MIN_BYTES` constants.
+  #
+  # The first line contains the number of lines that follow. After that, each
+  # line includes the allocation count, the total byte size of the allocations,
+  # then the call stack, separated by `\t`s. The lines do not assume any
+  # particular order. Example output:
+  #
+  # ```text
+  # 7
+  # 1       256     src/memprof.cr:118:5 in 'allocate'      /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/file_descriptor.cr:21:3 in 'new'        /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/file_descriptor.cr:191:5 in 'from_stdio'      /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/file_descriptor.cr:40:5 in 'from_stdio'        /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/kernel.cr:25:10 in '~STDOUT:init'
+  # 1       256     src/memprof.cr:118:5 in 'allocate'      /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/file_descriptor.cr:21:3 in 'new'        /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/file_descriptor.cr:191:5 in 'from_stdio'      /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/file_descriptor.cr:40:5 in 'from_stdio'        /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/kernel.cr:42:10 in '~STDERR:init'
+  # 1       152     src/memprof.cr:118:5 in 'allocate'      /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/fiber.cr:88:3 in 'new'     /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/concurrent.cr:61:3 in 'spawn:name'        /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/kernel.cr:558:1 in '__crystal_main'        /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:129:5 in 'main_user_code'
+  # 1       152     src/memprof.cr:118:5 in 'allocate'      /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/fiber.cr:125:3 in 'new'    /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/pthread.cr:42:19 in 'initialize'      /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/pthread.cr:39:3 in 'new'     /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/pthread.cr:62:3 in 'current'
+  # 1       152     src/memprof.cr:118:5 in 'allocate'      /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/fiber.cr:88:3 in 'new'     /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/concurrent.cr:61:3 in 'spawn:name'        /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/signal.cr:60:5 in 'start_loop' /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/signal.cr:163:5 in 'setup_default_handlers'
+  # 1       256     src/memprof.cr:118:5 in 'allocate'      /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/file_descriptor.cr:21:3 in 'new'        /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/file_descriptor.cr:158:9 in 'pipe'    /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io.cr:141:5 in 'pipe'      /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/signal.cr:15:12 in '~Crystal::System::Signal::pipe:init'
+  # 1       256     src/memprof.cr:118:5 in 'allocate'      /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/file_descriptor.cr:21:3 in 'new'        /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/file_descriptor.cr:159:9 in 'pipe'    /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io.cr:141:5 in 'pipe'      /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/signal.cr:15:12 in '~Crystal::System::Signal::pipe:init'
+  # ```
   def self.log_allocations(io : IO) : Nil
     GC.collect
     stopping do
@@ -274,14 +388,11 @@ module MemProf
         total_size = infos.sum { |_, info| info.size }
         count = infos.size
         {count, total_size, key}
-      end.sort_by! do |count, total_size, key|
-        {~total_size, ~count, key}
       end
 
-      all_stats.truncate(0...all_stats.index { |_, total_size, _| total_size < MIN_BYTES })
-
-      io << all_stats.size << '\n'
+      io << all_stats.count { |_, total_size, _| total_size >= MIN_BYTES } << '\n'
       all_stats.each do |count, total_size, key|
+        next if total_size < MIN_BYTES
         io << count << '\t' << total_size
         stack = [] of Void*
         key.each { |address| break if address.zero?; stack << Pointer(Void).new(address) }
@@ -292,6 +403,26 @@ module MemProf
     end
   end
 
+  # Logs the total sizes of known live allocations, aggregated by their call
+  # stacks, to the given *io* as a Markdown table.
+  #
+  # The behavior of this method can be controlled by the `STACK_DEPTH`,
+  # `STACK_SKIP`, and `MIN_BYTES` constants.
+  #
+  # The rows are sorted by each group's total size, then by allocation count,
+  # and finally by the call stacks. Example output:
+  #
+  # ```text
+  # | Allocations | Total size | Context |
+  # |------------:|-----------:|---------|
+  # | 1 | 256 | `/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/file_descriptor.cr:21:3 in 'new'`<br>`/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/file_descriptor.cr:191:5 in 'from_stdio'`<br>`/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/file_descriptor.cr:40:5 in 'from_stdio'`<br>`/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/kernel.cr:25:10 in '~STDOUT:init'`<br>`/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/kernel.cr:25:1 in '__crystal_main'` |
+  # | 1 | 256 | `/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/file_descriptor.cr:21:3 in 'new'`<br>`/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/file_descriptor.cr:191:5 in 'from_stdio'`<br>`/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/file_descriptor.cr:40:5 in 'from_stdio'`<br>`/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/kernel.cr:42:10 in '~STDERR:init'`<br>`/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/once.cr:25:54 in 'once'` |
+  # | 1 | 256 | `/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/file_descriptor.cr:21:3 in 'new'`<br>`/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/file_descriptor.cr:158:9 in 'pipe'`<br>`/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io.cr:141:5 in 'pipe'`<br>`/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/signal.cr:15:12 in '~Crystal::System::Signal::pipe:init'`<br>`/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/once.cr:25:54 in 'once'` |
+  # | 1 | 256 | `/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/file_descriptor.cr:21:3 in 'new'`<br>`/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/file_descriptor.cr:159:9 in 'pipe'`<br>`/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io.cr:141:5 in 'pipe'`<br>`/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/signal.cr:15:12 in '~Crystal::System::Signal::pipe:init'`<br>`/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/once.cr:25:54 in 'once'` |
+  # | 1 | 152 | `/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/fiber.cr:125:3 in 'new'`<br>`/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/pthread.cr:42:19 in 'initialize'`<br>`/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/pthread.cr:39:3 in 'new'`<br>`/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/pthread.cr:62:3 in 'current'`<br>`/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/scheduler.cr:26:5 in 'enqueue'` |
+  # | 1 | 152 | `/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/fiber.cr:88:3 in 'new'`<br>`/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/concurrent.cr:61:3 in 'spawn:name'`<br>`/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/kernel.cr:558:1 in '__crystal_main'`<br>`/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:129:5 in 'main_user_code'`<br>`/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:115:7 in 'main'` |
+  # | 1 | 152 | `/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/fiber.cr:88:3 in 'new'`<br>`/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/concurrent.cr:61:3 in 'spawn:name'`<br>`/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/signal.cr:60:5 in 'start_loop'`<br>`/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/signal.cr:163:5 in 'setup_default_handlers'`<br>`/opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/kernel.cr:558:1 in '__crystal_main'` |
+  # ```
   def self.pretty_log_allocations(io : IO) : Nil
     GC.collect
     stopping do
@@ -386,6 +517,7 @@ end
   {% for type in types %}
     {% unless type.type_vars.any?(&.is_a?(TypeNode)) %}
       class {{ type }}
+        # :nodoc:
         def self.allocate
           MemProf.set_type(self) { previous_def }
         end
@@ -396,6 +528,7 @@ end
 
 class Reference
   macro inherited
+    # :nodoc:
     def self.allocate
       MemProf.set_type(self) { previous_def }
     end
