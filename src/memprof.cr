@@ -87,16 +87,16 @@ module MemProf
     # be used to hide small objects that are only allocated very few times, e.g.
     # constants.
     #
-    # Configurable at build time using the `MEMPROF_MIN_BYTES` environment
+    # Configurable at run time using the `MEMPROF_MIN_BYTES` environment
     # variable.
-    MIN_BYTES = {{ (env("MEMPROF_MIN_BYTES") || "1024").to_i }}
+    MIN_BYTES = ENV["MEMPROF_MIN_BYTES"]?.try(&.to_i) || 1024
 
     # If set to `1`, logs all allocations to the standard error stream upon
     # normal program exit, via `at_exit { MemProf.log_allocations(STDERR) }`.
     #
-    # Configurable at build time using the `MEMPROF_PRINT_AT_EXIT` environment
+    # Configurable at run time using the `MEMPROF_PRINT_AT_EXIT` environment
     # variable.
-    PRINT_AT_EXIT = {{ env("MEMPROF_PRINT_AT_EXIT") == "1" }}
+    PRINT_AT_EXIT = ENV["MEMPROF_PRINT_AT_EXIT"]? == "1"
   {% end %}
 
   {% begin %}
