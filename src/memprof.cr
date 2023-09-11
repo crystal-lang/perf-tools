@@ -165,6 +165,106 @@ module MemProf
     end
   end
 
+  def self.log_object_counts(io : IO) : Nil
+    GC.collect
+    stopping do
+      lines = known_classes.count do |type_id, _|
+        obj_counts.fetch(type_id, 0_u64) > 0
+      end
+
+      io << lines << '\n'
+      known_classes.each do |type_id, name|
+        count = obj_counts.fetch(type_id, 0_u64)
+        next unless count > 0
+        io << count << '\t' << name << '\n'
+      end
+    end
+  end
+
+  def self.log_object_sizes(io : IO) : Nil
+    GC.collect
+    stopping do
+      alloc_infos = self.alloc_infos
+
+      counts = {} of Int32 => UInt64
+      references = {} of Int32 => PerfTools::Intervals
+
+      alloc_infos.each do |ptr, info|
+        next if info.type_id == 0 # skip allocations with no type info
+        if info.atomic
+          counts[info.type_id] = counts.fetch(info.type_id, 0_u64) &+ info.size
+        else
+          referenced = references[info.type_id] ||= PerfTools::Intervals.new
+          referenced.add(ptr, info.size)
+        end
+      end
+
+      references.each do |type_id, referenced|
+        frontier = referenced.dup
+
+        until frontier.empty?
+          new_frontier = PerfTools::Intervals.new
+          referenced.each do |start, size|
+            each_inner_pointer(Pointer(Void*).new(start), size) do |subptr|
+              next unless subinfo = alloc_infos[subptr.address]?
+              referenced.add(subptr.address, subinfo.size)
+              new_frontier.add(subptr.address, subinfo.size) unless subinfo.atomic
+            end
+          end
+          referenced.each do |start, size|
+            new_frontier.delete(start, size)
+          end
+          frontier = new_frontier
+        end
+
+        counts[type_id] = counts.fetch(type_id, 0_u64) &+ referenced.size
+      end
+
+      io << counts.size << '\n'
+      counts.each do |type_id, bytes|
+        io << bytes << '\t'
+        if name = known_classes[type_id]?
+          io << name
+        else
+          io << "(class " << type_id << ")"
+        end
+        io << '\n'
+      end
+    end
+  end
+
+  private def self.reachable_set_size(ptr : Void*, size : Int) : UInt64
+    alloc_infos = self.alloc_infos
+    referenced = PerfTools::Intervals.new
+    referenced.add(ptr.address, size)
+    frontier = referenced.dup
+
+    until frontier.empty?
+      new_frontier = PerfTools::Intervals.new
+      referenced.each do |start, size|
+        each_inner_pointer(Pointer(Void*).new(start), size) do |subptr|
+          next unless subinfo = alloc_infos[subptr.address]?
+          referenced.add(subptr.address, subinfo.size)
+          new_frontier.add(subptr.address, subinfo.size) unless subinfo.atomic
+        end
+      end
+      referenced.each do |start, size|
+        new_frontier.delete(start, size)
+      end
+      frontier = new_frontier
+    end
+
+    referenced.size
+  end
+
+  private def self.each_inner_pointer(ptr : Void**, size : Int, &)
+    # this counts only pointers that are pointer-aligned
+    (size // sizeof(Void*)).times do |i|
+      yield ptr.value
+      ptr += 1
+    end
+  end
+
   def self.log_allocations(io : IO) : Nil
     GC.collect
     stopping do
