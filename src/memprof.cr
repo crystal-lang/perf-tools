@@ -96,29 +96,57 @@ module MemProf
   {% end %}
 
   # must be UInt64 so that `Key` itself is allocated atomically
-  private record AllocInfo, size : UInt64, key : StaticArray(UInt64, STACK_DEPTH)
+  private record AllocInfo, size : UInt64, key : StaticArray(UInt64, STACK_DEPTH), type_id : Int32, atomic : Bool
 
   class_getter alloc_infos : Hash(UInt64, AllocInfo) do
     stopping { Hash(UInt64, AllocInfo).new }
   end
 
-  def self.track(ptr : Void*, size : UInt64) : Void* forall T
+  class_getter obj_counts : Hash(Int32, UInt64) do
+    {} of Int32 => UInt64
+  end
+
+  class_getter known_classes : Hash(Int32, String) do
+    {} of Int32 => String
+  end
+
+  @@last_type_id = 0
+  @@last_type_name : String?
+
+  def self.set_type(type : T.class, &) forall T
+    @@last_type_id = T.crystal_instance_type_id
+    @@last_type_name = T.name
+    yield
+  end
+
+  def self.track(ptr : Void*, size : UInt64, atomic : Bool) : Void* forall T
     if running?
       stopping do
+        type_id, @@last_type_id = @@last_type_id, 0
         stack = StaticArray(Void*, STACK_TOTAL).new(Pointer(Void).null)
         Exception::CallStack.unwind_to(stack.to_slice)
         key = StaticArray(UInt64, STACK_DEPTH).new { |i| stack.unsafe_fetch(STACK_SKIP &+ i).address }
+        alloc_infos[ptr.address] = AllocInfo.new(size, key, type_id, atomic)
+        unless type_id == 0
+          obj_counts = self.obj_counts
+          obj_counts[type_id] = obj_counts.fetch(type_id, 0_u64) &+ 1
+          known_classes[type_id] = @@last_type_name.not_nil!
+        end
       end
     end
     ptr
   end
 
-  def self.untrack(ptr : Void*) forall T
+  def self.untrack(ptr : Void*) : Bool forall T
     if running?
       stopping do
-        alloc_infos.delete(ptr.address)
+        if info = alloc_infos.delete(ptr.address)
+          obj_counts[info.type_id] &-= 1 unless info.type_id == 0
+          return info.atomic
+        end
       end
     end
+    false
   end
 
   def self.stopping(&)
@@ -205,23 +233,44 @@ end
 module GC
   # :nodoc:
   def self.malloc(size : LibC::SizeT) : Void*
-    MemProf.track(previous_def, size.to_u64)
+    MemProf.track(previous_def, size.to_u64, false)
   end
 
   # :nodoc:
   def self.malloc_atomic(size : LibC::SizeT) : Void*
-    MemProf.track(previous_def, size.to_u64)
+    MemProf.track(previous_def, size.to_u64, true)
   end
 
   # :nodoc:
   def self.realloc(ptr : Void*, size : LibC::SizeT) : Void*
-    MemProf.untrack(ptr)
-    MemProf.track(previous_def, size.to_u64)
+    was_atomic = MemProf.untrack(ptr)
+    MemProf.track(previous_def, size.to_u64, was_atomic)
   end
 
   # :nodoc:
   def self.free(pointer : Void*) : Nil
     MemProf.untrack(pointer)
     previous_def
+  end
+end
+
+{% begin %}
+  {% types = Reference.all_subclasses %}
+  {% for type in types %}
+    {% unless type.type_vars.any?(&.is_a?(TypeNode)) %}
+      class {{ type }}
+        def self.allocate
+          MemProf.set_type(self) { previous_def }
+        end
+      end
+    {% end %}
+  {% end %}
+{% end %}
+
+class Reference
+  macro inherited
+    def self.allocate
+      MemProf.set_type(self) { previous_def }
+    end
   end
 end
