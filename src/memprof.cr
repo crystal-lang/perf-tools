@@ -165,7 +165,34 @@ module MemProf
     end
   end
 
-  def self.log(io : IO) : Nil
+  def self.log_allocations(io : IO) : Nil
+    GC.collect
+    stopping do
+      all_stats = self.alloc_infos.group_by do |_, info|
+        info.key
+      end.map do |key, infos|
+        total_size = infos.sum { |_, info| info.size }
+        count = infos.size
+        {count, total_size, key}
+      end.sort_by! do |count, total_size, key|
+        {~total_size, ~count, key}
+      end
+
+      all_stats.truncate(0...all_stats.index { |_, total_size, _| total_size < MIN_BYTES })
+
+      io << all_stats.size << '\n'
+      all_stats.each do |count, total_size, key|
+        io << count << '\t' << total_size
+        stack = [] of Void*
+        key.each { |address| break if address.zero?; stack << Pointer(Void).new(address) }
+        trace = Exception::CallStack.new(__callstack: stack).printable_backtrace
+        trace.each { |entry| io << '\t' << entry }
+        io << '\n'
+      end
+    end
+  end
+
+  def self.pretty_log_allocations(io : IO) : Nil
     GC.collect
     stopping do
       all_stats = self.alloc_infos.group_by do |_, info|
@@ -216,7 +243,7 @@ module MemProf
     )
 
     {% if PRINT_AT_EXIT %}
-      at_exit { log(STDERR) }
+      at_exit { log_allocations(STDERR) }
     {% end %}
   end
 
