@@ -6,18 +6,81 @@
 # spawn / yield stacks and counted separately. The main fiber of each thread is
 # not shown yet.
 
-class Fiber
+require "./common"
+
+module PerfTools::FiberTrace
+  # :nodoc:
   class_getter spawn_stack = {} of Fiber => Array(String)
+
+  # :nodoc:
   class_getter yield_stack = {} of Fiber => Array(String)
 
+  {% begin %}
+    STACK_DEPTH = {{ (env("FIBERTRACE_STACK_DEPTH") || "5").to_i }}
+
+    STACK_SKIP = {{ (env("FIBERTRACE_STACK_SKIP") || "4").to_i }}
+  {% end %}
+
+  def self.print_stacks(io : IO) : Nil
+    # The top 3 spawn frames are:
+    #
+    # * the redefined `Fiber#initialize`
+    # * `Fiber.new`
+    # * the redefined `spawn`
+    #
+    # The top 4 yield framse are:
+    #
+    # * the redefined `Crystal::Scheduler#resume`
+    # * `Crystal::Scheduler.resume`
+    # * `Fiber#resume`
+    # * `Crystal::Scheduler#reschedule`
+    #
+    # To reduce bloat we skip those frames when grouping the fiber records.
+
+    uniqs = spawn_stack
+      .map { |fiber, stack| {fiber.name, stack, yield_stack[fiber]?} }
+      .group_by { |_, s, y| {s[3..], y.try &.[4..]} }
+      .transform_values(&.map { |fiber, _, _| fiber })
+      .to_a
+      .sort_by! { |(s, y), names| {-names.size, s, y || %w()} }
+
+    io.puts "| Count | Fibers | Spawn stack | Yield stack |"
+    io.puts "|------:|:-------|:------------|:------------|"
+    uniqs.each do |(s, y), names|
+      io << "| "
+      io << names.size
+      io << " | "
+      names.compact.join(io, ' ') { |name| md_code_span(io, name) }
+      io << " | "
+      s.join(io, "<br>") { |frame| md_code_span(io, frame) }
+      io << " | "
+      if y
+        y.join(io, "<br>") { |frame| md_code_span(io, frame) }
+      else
+        io << "*N/A*"
+      end
+      io << " |\n"
+    end
+  end
+
+  private def self.md_code_span(io : IO, str : String) : Nil
+    ticks = 0
+    str.scan(/`+/) { |m| ticks = {ticks, m.size}.max }
+    ticks.times { io << '`' }
+    io << "` " << str << " `"
+    ticks.times { io << '`' }
+  end
+end
+
+class Fiber
   def initialize(@name : String? = nil, &@proc : ->)
     previous_def(name, &proc)
-    Fiber.spawn_stack[self] = caller
+    PerfTools::FiberTrace.spawn_stack[self] = caller
   end
 
   def self.inactive(fiber : Fiber)
-    spawn_stack.delete(fiber)
-    yield_stack.delete(fiber)
+    PerfTools::FiberTrace.spawn_stack.delete(fiber)
+    PerfTools::FiberTrace.yield_stack.delete(fiber)
     previous_def
   end
 
@@ -55,61 +118,11 @@ class Fiber
       Crystal::Scheduler.reschedule
     end
   {% end %}
-
-  def self.print_stacks(io : IO) : Nil
-    # The top 3 spawn frames are:
-    #
-    # * the redefined `Fiber#initialize`
-    # * `Fiber.new`
-    # * the redefined `spawn`
-    #
-    # The top 4 yield framse are:
-    #
-    # * the redefined `Crystal::Scheduler#resume`
-    # * `Crystal::Scheduler.resume`
-    # * `Fiber#resume`
-    # * `Crystal::Scheduler#reschedule`
-    #
-    # To reduce bloat we skip those frames when grouping the fiber records.
-
-    uniqs = Fiber.spawn_stack
-      .map { |fiber, stack| {fiber.name, stack, Fiber.yield_stack[fiber]?} }
-      .group_by { |_, s, y| {s[3..], y.try &.[4..]} }
-      .transform_values(&.map { |fiber, _, _| fiber })
-      .to_a
-      .sort_by! { |(s, y), names| {-names.size, s, y || %w()} }
-
-    io.puts "| Count | Fibers | Spawn stack | Yield stack |"
-    io.puts "|------:|:-------|:------------|:------------|"
-    uniqs.each do |(s, y), names|
-      io << "| "
-      io << names.size
-      io << " | "
-      names.compact.join(io, ' ') { |name| md_code_span(io, name) }
-      io << " | "
-      s.join(io, "<br>") { |frame| md_code_span(io, frame) }
-      io << " | "
-      if y
-        y.join(io, "<br>") { |frame| md_code_span(io, frame) }
-      else
-        io << "*N/A*"
-      end
-      io << " |\n"
-    end
-  end
-
-  private def self.md_code_span(io : IO, str : String) : Nil
-    ticks = 0
-    str.scan(/`+/) { |m| ticks = {ticks, m.size}.max }
-    ticks.times { io << '`' }
-    io << "` " << str << " `"
-    ticks.times { io << '`' }
-  end
 end
 
 class Crystal::Scheduler
   protected def resume(fiber : Fiber) : Nil
-    Fiber.yield_stack[@current] = caller
+    PerfTools::FiberTrace.yield_stack[@current] = caller
     previous_def
   end
 end
