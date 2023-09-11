@@ -1,0 +1,12 @@
+name: perf-tools
+version: 0.1.0
+
+authors:
+  - Quinton Miller <nicetas.c@gmail.com>
+
+description: |
+  An assortment of tools to track resources in Crystal applications
+
+crystal: ~> 1.8
+
+license: MIT
