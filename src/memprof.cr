@@ -174,47 +174,54 @@ module MemProf
     end
   end
 
-  {% if PRINT_AT_EXIT %}
-    at_exit { MemProf.log(STDERR) }
-  {% end %}
+  private def self.init
+    LibGC.register_disclaim_proc(
+      LibGC::GC_I_PTRFREE,
+      ->(ptr : Void*) { untrack(ptr); 0 },
+      0,
+    )
+
+    LibGC.register_disclaim_proc(
+      LibGC::GC_I_NORMAL,
+      ->(ptr : Void*) { untrack(ptr); 0 },
+      0,
+    )
+
+    {% if PRINT_AT_EXIT %}
+      at_exit { log(STDERR) }
+    {% end %}
+  end
+
+  init
+end
+
+lib LibGC
+  GC_I_PTRFREE = 0
+  GC_I_NORMAL  = 1
+
+  fun register_disclaim_proc = GC_register_disclaim_proc(kind : Int, proc : Void* -> Int, mark_from_all : Int)
 end
 
 module GC
   # :nodoc:
   def self.malloc(size : LibC::SizeT) : Void*
-    ptr = MemProf.track(previous_def, size.to_u64)
-    LibGC.register_finalizer_ignore_self(ptr, ->(obj, data) { MemProf.untrack(obj) }, nil, nil, nil)
-    ptr
+    MemProf.track(previous_def, size.to_u64)
   end
 
   # :nodoc:
   def self.malloc_atomic(size : LibC::SizeT) : Void*
-    ptr = MemProf.track(previous_def, size.to_u64)
-    LibGC.register_finalizer_ignore_self(ptr, ->(obj, data) { MemProf.untrack(obj) }, nil, nil, nil)
-    ptr
+    MemProf.track(previous_def, size.to_u64)
   end
 
   # :nodoc:
   def self.realloc(ptr : Void*, size : LibC::SizeT) : Void*
     MemProf.untrack(ptr)
-    ptr = MemProf.track(previous_def, size.to_u64)
-    LibGC.register_finalizer_ignore_self(ptr, ->(obj, data) { MemProf.untrack(obj) }, nil, nil, nil)
-    ptr
+    MemProf.track(previous_def, size.to_u64)
   end
 
   # :nodoc:
   def self.free(pointer : Void*) : Nil
     MemProf.untrack(pointer)
     previous_def
-  end
-
-  private def self.add_finalizer_impl(object : T) forall T
-    LibGC.register_finalizer_ignore_self(object.as(Void*),
-      ->(obj, data) do
-        obj.as(T).finalize
-        MemProf.untrack(obj)
-      end,
-      nil, nil, nil)
-    nil
   end
 end
