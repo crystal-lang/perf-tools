@@ -1,5 +1,6 @@
 require "./common"
 
+# In-memory tracking of all existing fibers in the running program.
 module PerfTools::FiberTrace
   # :nodoc:
   class_getter spawn_stack = {} of Fiber => Array(String)

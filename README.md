@@ -2,20 +2,31 @@
 
 An assortment of tools to track resources in Crystal applications.
 
-## memprof.cr
-
-## fiber_trace.cr
-
 ## Usage
 
-Check each tool's instructions.
+```crystal
+require "perf_tools/mem_prof"
+
+PerfTools::MemProf.log_object_counts(STDOUT)
+PerfTools::MemProf.log_object_sizes(STDOUT)
+PerfTools::MemProf.log_allocations(STDOUT)
+PerfTools::MemProf.pretty_log_allocations(STDOUT)
+```
+
+```crystal
+require "perf_tools/fiber_trace"
+
+PerfTools::FiberTrace.pretty_log_fibers(STDOUT)
+```
+
+Check each tool's instructions for more information.
 
 ## Installation
 
 Add this to your application's `shard.yml`:
 
 ```yml
-dependencies:
+development_dependencies:
   perf-tools:
     github: crystal-lang/perf-tools
 ```

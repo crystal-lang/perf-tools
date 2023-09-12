@@ -17,7 +17,7 @@ require "./common"
 # end
 #
 # arr = Array.new(100000) { Foo.new }
-# MemProf.log(STDOUT)
+# MemProf.pretty_log_allocations(STDOUT)
 # ```
 #
 # The above prints something like:
@@ -34,7 +34,7 @@ require "./common"
 #
 # ```
 # arr.truncate(0, 1000)
-# MemProf.log(STDOUT)
+# MemProf.pretty_log_allocations(STDOUT)
 # ```
 #
 # ```text

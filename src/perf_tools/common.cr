@@ -1,5 +1,5 @@
-# :nodoc:
 module PerfTools
+  # :nodoc:
   # A collection of non-intersecting, sorted intervals representing pointer
   # addresses. (The element type must be an integer to avoid false references.)
   # Used to perform breadth-first searches over the GC heap for connected
