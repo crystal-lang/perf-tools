@@ -16,6 +16,7 @@ PerfTools::MemProf.pretty_log_allocations(STDOUT)
 ```crystal
 require "perf_tools/fiber_trace"
 
+PerfTools::FiberTrace.log_fibers(STDOUT)
 PerfTools::FiberTrace.pretty_log_fibers(STDOUT)
 ```
 
