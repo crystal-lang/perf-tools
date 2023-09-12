@@ -9,18 +9,35 @@ module PerfTools::FiberTrace
   class_getter yield_stack = {} of Fiber => Array(Void*)
 
   {% begin %}
-    # :nodoc:
-    STACK_DEPTH = {{ (env("FIBERTRACE_STACK_DEPTH") || "5").to_i }}
+    # The maximum number of stack frames shown for `FiberTrace.log_fibers` and
+    # `FiberTrace.pretty_log_fibers`.
+    #
+    # Configurable at run time using the `FIBERTRACE_STACK_DEPTH` environment
+    # variable.
+    STACK_DEPTH = ENV["FIBERTRACE_STACK_DEPTH"]?.try(&.to_i) || 5
 
-    # :nodoc:
-    STACK_SKIP_SPAWN = {{ (env("FIBERTRACE_STACK_SKIP_SPAWN") || "4").to_i }}
+    # The number of stack frames to skip from the fiber creation call stacks for
+    # `FiberTrace.log_fibers` and `FiberTrace.pretty_log_fibers`. There is
+    # usually no reason to alter this.
+    #
+    # Configurable at run time using the `FIBERTRACE_STACK_SKIP_SPAWN`
+    # environment variable.
+    STACK_SKIP_SPAWN = ENV["FIBERTRACE_STACK_SKIP_SPAWN"]?.try(&.to_i) || 4
 
-    # :nodoc:
-    STACK_SKIP_YIELD = {{ (env("FIBERTRACE_STACK_SKIP_YIELD") || "5").to_i }}
+    # The number of stack frames to skip from the fiber yield call stacks for
+    # `FiberTrace.log_fibers` and `FiberTrace.pretty_log_fibers`. There is
+    # usually no reason to alter this.
+    #
+    # Configurable at run time using the `FIBERTRACE_STACK_SKIP_YIELD`
+    # environment variable.
+    STACK_SKIP_YIELD = ENV["FIBERTRACE_STACK_SKIP_YIELD"]?.try(&.to_i) || 5
   {% end %}
 
   # Logs all existing fibers, plus the call stacks at their creation
   # and last yield, to the given *io*.
+  #
+  # The behavior of this method can be controlled by the `STACK_DEPTH`,
+  # `STACK_SKIP_SPAWN`, and `STACK_SKIP_YIELD` constants.
   #
   # The first line contains the number of fibers. For each fiber, the first line
   # is the fiber's name (may be empty), and the second line is the number of
@@ -100,7 +117,18 @@ module PerfTools::FiberTrace
   # Logs all existing fibers, aggregated by the call stacks at their creation
   # and last yield, to the given *io* as a Markdown table.
   #
+  # The behavior of this method can be controlled by the `STACK_DEPTH`,
+  # `STACK_SKIP_SPAWN`, and `STACK_SKIP_YIELD` constants.
+  #
   # Example output:
+  #
+  # ```
+  # require "perf_tools/fiber_trace"
+  #
+  # spawn { sleep }
+  # sleep 1
+  # PerfTools::FiberTrace.pretty_log_fibers(STDOUT)
+  # ```
   #
   # ```text
   # | Count | Fibers | Spawn stack | Yield stack |
