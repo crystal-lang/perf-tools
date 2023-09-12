@@ -454,7 +454,7 @@ module PerfTools::MemProf
         stack = [] of Void*
         key.each { |address| break if address.zero?; stack << Pointer(Void).new(address) }
         trace = Exception::CallStack.new(__callstack: stack).printable_backtrace
-        trace.join(io, "<br>") { |entry| io << '`' << entry << '`' }
+        trace.join(io, "<br>") { |entry| PerfTools.md_code_span(io, entry) }
         io << " |\n"
       end
     end

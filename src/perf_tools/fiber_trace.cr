@@ -156,25 +156,17 @@ module PerfTools::FiberTrace
       io << "| "
       io << names.size
       io << " | "
-      names.compact.join(io, ' ') { |name| md_code_span(io, name) }
+      names.compact.join(io, ' ') { |name| PerfTools.md_code_span(io, name) }
       io << " | "
-      s.join(io, "<br>") { |frame| md_code_span(io, frame) }
+      s.join(io, "<br>") { |frame| PerfTools.md_code_span(io, frame) }
       io << " | "
       if y
-        y.join(io, "<br>") { |frame| md_code_span(io, frame) }
+        y.join(io, "<br>") { |frame| PerfTools.md_code_span(io, frame) }
       else
         io << "*N/A*"
       end
       io << " |\n"
     end
-  end
-
-  private def self.md_code_span(io : IO, str : String) : Nil
-    ticks = 0
-    str.scan(/`+/) { |m| ticks = {ticks, m.size}.max }
-    ticks.times { io << '`' }
-    io << "` " << str << " `"
-    ticks.times { io << '`' }
   end
 end
 

@@ -1,4 +1,12 @@
 module PerfTools
+  protected def self.md_code_span(io : IO, str : String) : Nil
+    ticks = 0
+    str.scan(/`+/) { |m| ticks = {ticks, m.size}.max }
+    ticks.times { io << '`' }
+    io << "` " << str << " `"
+    ticks.times { io << '`' }
+  end
+
   # :nodoc:
   # A collection of non-intersecting, sorted intervals representing pointer
   # addresses. (The element type must be an integer to avoid false references.)
