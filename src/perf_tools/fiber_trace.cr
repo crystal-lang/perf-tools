@@ -3,23 +3,20 @@ require "./common"
 # In-memory tracking of all existing fibers in the running program.
 module PerfTools::FiberTrace
   # :nodoc:
-  class_getter spawn_stack = {} of Fiber => Array(String)
+  class_getter spawn_stack = {} of Fiber => Array(Void*)
 
   # :nodoc:
-  class_getter yield_stack = {} of Fiber => Array(String)
+  class_getter yield_stack = {} of Fiber => Array(Void*)
 
   {% begin %}
     # :nodoc:
-    # TODO: support
     STACK_DEPTH = {{ (env("FIBERTRACE_STACK_DEPTH") || "5").to_i }}
 
     # :nodoc:
-    # TODO: support
-    STACK_SKIP_NEW = {{ (env("FIBERTRACE_STACK_SKIP_NEW") || "4").to_i }}
+    STACK_SKIP_SPAWN = {{ (env("FIBERTRACE_STACK_SKIP_SPAWN") || "4").to_i }}
 
     # :nodoc:
-    # TODO: support
-    STACK_SKIP_YIELD = {{ (env("FIBERTRACE_STACK_SKIP_YIELD") || "4").to_i }}
+    STACK_SKIP_YIELD = {{ (env("FIBERTRACE_STACK_SKIP_YIELD") || "5").to_i }}
   {% end %}
 
   # Logs all existing fibers, plus the call stacks at their creation
@@ -47,37 +44,26 @@ module PerfTools::FiberTrace
   # /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:129:5 in 'main_user_code'
   # /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:115:7 in 'main'
   # /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:141:3 in 'main'
-  # 6
+  # 5
   # /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/scheduler.cr:174:5 in 'sleep'
   # /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/scheduler.cr:58:5 in 'sleep'
   # /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/concurrent.cr:14:3 in 'sleep'
   # /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/kernel.cr:558:1 in '->'
-  # src/perf_tools/fiber_trace.cr:132:3 in 'run'
-  # /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/fiber.cr:98:34 in '->'
+  # src/perf_tools/fiber_trace.cr:184:3 in 'run'
   # Signal Loop
-  # 6
+  # 5
   # /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/signal.cr:60:5 in 'start_loop'
   # /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/signal.cr:163:5 in 'setup_default_handlers'
   # /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/kernel.cr:558:1 in '__crystal_main'
   # /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:129:5 in 'main_user_code'
   # /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:115:7 in 'main'
-  # /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:141:3 in 'main'
-  # 14
+  # 5
   # /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/scheduler.cr:50:5 in 'reschedule'
   # /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/evented.cr:128:5 in 'wait_readable'
   # /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/evented.cr:119:3 in 'wait_readable'
   # /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/evented.cr:59:9 in 'unbuffered_read'
   # /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/buffered.cr:261:5 in 'fill_buffer'
-  # /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/buffered.cr:82:9 in 'read'
-  # /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io.cr:540:7 in 'read_fully?'
-  # /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io.cr:523:5 in 'read_fully'
-  # /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/byte_format.cr:123:3 in 'decode'
-  # /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/int.cr:781:5 in 'from_io'
-  # /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io.cr:916:5 in 'read_bytes'
-  # /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/signal.cr:62:17 in '->'
-  # src/perf_tools/fiber_trace.cr:132:3 in 'run'
-  # /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/fiber.cr:98:34 in '->'
-
+  #
   # 4
   # test.cr:4:1 in '__crystal_main'
   # /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:129:5 in 'main_user_code'
@@ -87,7 +73,7 @@ module PerfTools::FiberTrace
   # /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/scheduler.cr:50:5 in 'reschedule'
   # /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/concurrent.cr:29:3 in 'sleep'
   # test.cr:3:9 in '->'
-  # src/perf_tools/fiber_trace.cr:132:3 in 'run'
+  # src/perf_tools/fiber_trace.cr:184:3 in 'run'
   # /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/fiber.cr:98:34 in '->'
   # ```
   #
@@ -97,13 +83,17 @@ module PerfTools::FiberTrace
     spawn_stack.each do |fiber, stack|
       io << fiber.name << '\n'
 
-      s = stack[3..]
+      s = Exception::CallStack.new(__callstack: stack).printable_backtrace
       io << s.size << '\n'
       s.each { |frame| io << frame << '\n' }
 
-      y = yield_stack[fiber]?.try(&.[4..])
-      io << (y.try(&.size) || 0) << '\n'
-      y.try &.each { |frame| io << frame << '\n' }
+      if yield_stack = self.yield_stack[fiber]?
+        y = Exception::CallStack.new(__callstack: yield_stack).printable_backtrace
+        io << y.size << '\n'
+        y.each { |frame| io << frame << '\n' }
+      else
+        io << '0' << '\n'
+      end
     end
   end
 
@@ -115,38 +105,26 @@ module PerfTools::FiberTrace
   # ```text
   # | Count | Fibers | Spawn stack | Yield stack |
   # |------:|:-------|:------------|:------------|
-  # | 1 | ` Signal Loop ` | ` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/signal.cr:60:5 in 'start_loop' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/signal.cr:163:5 in 'setup_default_handlers' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/kernel.cr:558:1 in '__crystal_main' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:129:5 in 'main_user_code' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:115:7 in 'main' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:141:3 in 'main' ` | ` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/scheduler.cr:50:5 in 'reschedule' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/evented.cr:128:5 in 'wait_readable' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/evented.cr:119:3 in 'wait_readable' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/evented.cr:59:9 in 'unbuffered_read' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/buffered.cr:261:5 in 'fill_buffer' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/buffered.cr:82:9 in 'read' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io.cr:540:7 in 'read_fully?' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io.cr:523:5 in 'read_fully' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/byte_format.cr:123:3 in 'decode' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/int.cr:781:5 in 'from_io' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io.cr:916:5 in 'read_bytes' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/signal.cr:62:17 in '->' `<br>` src/perf_tools/fiber_trace.cr:98:3 in 'run' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/fiber.cr:98:34 in '->' ` |
-  # | 1 | ` Fiber Clean Loop ` | ` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/kernel.cr:558:1 in '__crystal_main' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:129:5 in 'main_user_code' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:115:7 in 'main' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:141:3 in 'main' ` | ` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/scheduler.cr:174:5 in 'sleep' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/scheduler.cr:58:5 in 'sleep' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/concurrent.cr:14:3 in 'sleep' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/kernel.cr:558:1 in '->' `<br>` src/perf_tools/fiber_trace.cr:98:3 in 'run' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/fiber.cr:98:34 in '->' ` |
+  # | 1 | ` Fiber Clean Loop ` | ` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/kernel.cr:558:1 in '__crystal_main' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:129:5 in 'main_user_code' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:115:7 in 'main' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:141:3 in 'main' ` | ` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/scheduler.cr:174:5 in 'sleep' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/scheduler.cr:58:5 in 'sleep' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/concurrent.cr:14:3 in 'sleep' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/kernel.cr:558:1 in '->' `<br>` /Users/quinton/crystal/perf-tools/src/perf_tools/fiber_trace.cr:172:3 in 'run' ` |
+  # | 1 |  | ` test.cr:4:1 in '__crystal_main' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:129:5 in 'main_user_code' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:115:7 in 'main' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:141:3 in 'main' ` | ` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/scheduler.cr:50:5 in 'reschedule' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/concurrent.cr:29:3 in 'sleep' `<br>` test.cr:3:9 in '->' `<br>` /Users/quinton/crystal/perf-tools/src/perf_tools/fiber_trace.cr:172:3 in 'run' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/fiber.cr:98:34 in '->' ` |
+  # | 1 | ` Signal Loop ` | ` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/signal.cr:60:5 in 'start_loop' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/signal.cr:163:5 in 'setup_default_handlers' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/kernel.cr:558:1 in '__crystal_main' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:129:5 in 'main_user_code' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:115:7 in 'main' ` | ` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/scheduler.cr:50:5 in 'reschedule' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/evented.cr:128:5 in 'wait_readable' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/evented.cr:119:3 in 'wait_readable' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/evented.cr:59:9 in 'unbuffered_read' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/buffered.cr:261:5 in 'fill_buffer' ` |
   # ```
   #
   # NOTE: The main fiber of each thread is not shown.
   def self.pretty_log_fibers(io : IO) : Nil
-    # The top 3 spawn frames are:
-    #
-    # * the redefined `Fiber#initialize`
-    # * `Fiber.new`
-    # * the redefined `spawn`
-    #
-    # The top 4 yield frames are:
-    #
-    # * the redefined `Crystal::Scheduler#resume`
-    # * `Crystal::Scheduler.resume`
-    # * `Fiber#resume`
-    # * `Crystal::Scheduler#reschedule`
-    #
-    # To reduce bloat we skip those frames when grouping the fiber records.
-    # TODO: make these customizable using the constants above
-
     uniqs = spawn_stack
       .map { |fiber, stack| {fiber.name, stack, yield_stack[fiber]?} }
-      .group_by { |_, s, y| {s[3..], y.try &.[4..]} }
+      .group_by { |_, s, y| {s, y} }
       .transform_values(&.map { |fiber, _, _| fiber })
       .to_a
-      .sort_by! { |(s, y), names| {-names.size, s, y || %w()} }
+      .sort_by! { |(s, y), names| {-names.size, s, y || Array(Void*).new} }
 
     io.puts "| Count | Fibers | Spawn stack | Yield stack |"
     io.puts "|------:|:-------|:------------|:------------|"
     uniqs.each do |(s, y), names|
+      s = Exception::CallStack.new(__callstack: s).printable_backtrace
+      y = y.try { |y| Exception::CallStack.new(__callstack: y).printable_backtrace }
+
       io << "| "
       io << names.size
       io << " | "
@@ -175,7 +153,14 @@ end
 class Fiber
   def initialize(@name : String? = nil, &@proc : ->)
     previous_def(name, &proc)
-    PerfTools::FiberTrace.spawn_stack[self] = caller
+
+    stack = Array.new(PerfTools::FiberTrace::STACK_DEPTH + PerfTools::FiberTrace::STACK_SKIP_SPAWN, Pointer(Void).null)
+    Exception::CallStack.unwind_to(Slice.new(stack.to_unsafe, stack.size))
+    stack.truncate(PerfTools::FiberTrace::STACK_SKIP_SPAWN..)
+    while stack.last? == Pointer(Void).null
+      stack.pop
+    end
+    PerfTools::FiberTrace.spawn_stack[self] = stack
   end
 
   def self.inactive(fiber : Fiber)
@@ -222,7 +207,14 @@ end
 
 class Crystal::Scheduler
   protected def resume(fiber : Fiber) : Nil
-    PerfTools::FiberTrace.yield_stack[@current] = caller
+    stack = Array.new(PerfTools::FiberTrace::STACK_DEPTH + PerfTools::FiberTrace::STACK_SKIP_YIELD, Pointer(Void).null)
+    Exception::CallStack.unwind_to(Slice.new(stack.to_unsafe, stack.size))
+    stack.truncate(PerfTools::FiberTrace::STACK_SKIP_YIELD..)
+    while stack.last? == Pointer(Void).null
+      stack.pop
+    end
+    PerfTools::FiberTrace.yield_stack[@current] = stack
+
     previous_def
   end
 end
