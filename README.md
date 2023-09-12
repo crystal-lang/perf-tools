@@ -4,6 +4,8 @@ An assortment of tools to track resources in Crystal applications.
 
 ## Usage
 
+To log the number of allocations, objects, or their sizes:
+
 ```crystal
 require "perf_tools/mem_prof"
 
@@ -12,6 +14,8 @@ PerfTools::MemProf.log_object_sizes(STDOUT)
 PerfTools::MemProf.log_allocations(STDOUT)
 PerfTools::MemProf.pretty_log_allocations(STDOUT)
 ```
+
+To log all fibers:
 
 ```crystal
 require "perf_tools/fiber_trace"
