@@ -32,7 +32,7 @@ Add this to your application's `shard.yml`:
 
 ```yml
 development_dependencies:
-  perf-tools:
+  perf_tools:
     github: crystal-lang/perf-tools
 ```
 
