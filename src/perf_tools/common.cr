@@ -97,33 +97,87 @@ struct Exception::CallStack
   def initialize(*, __callstack @callstack : Array(Void*))
   end
 
-  {% if flag?(:interpreted) %} @[Primitive(:interpreter_call_stack_unwind)] {% end %}
-  def self.unwind_to(buf : Slice(Void*)) : Nil
-    callstack = {buf.to_unsafe, buf.to_unsafe + buf.size}
-    backtrace_fn = ->(context : LibUnwind::Context, data : Void*) do
-      b, e = data.as({Void**, Void**}*).value
-      return LibUnwind::ReasonCode::END_OF_STACK if b >= e
-      data.as({Void**, Void**}*).value = {b + 1, e}
+  {% if flag?(:win32) %}
+    {% if flag?(:interpreted) %} @[Primitive(:interpreter_call_stack_unwind)] {% end %}
+    def self.unwind_to(buf : Slice(Void*)) : Nil
+      # TODO: use stack if possible (must be 16-byte aligned)
+      context = Pointer(LibC::CONTEXT).malloc(1)
+      context.value.contextFlags = LibC::CONTEXT_FULL
+      LibC.RtlCaptureContext(context)
+        
+      # unlike DWARF, this is required on Windows to even be able to produce
+      # correct stack traces, so we do it here but not in `libunwind.cr`
+      load_debug_info
 
-      ip = {% if flag?(:arm) %}
-             Pointer(Void).new(__crystal_unwind_get_ip(context))
-           {% else %}
-             Pointer(Void).new(LibUnwind.get_ip(context))
-           {% end %}
-      b.value = ip
+      machine_type = {% if flag?(:x86_64) %}
+                      LibC::IMAGE_FILE_MACHINE_AMD64
+                    {% elsif flag?(:i386) %}
+                      # TODO: use WOW64_CONTEXT in place of CONTEXT
+                      {% raise "x86 not supported" %}
+                    {% else %}
+                      {% raise "Architecture not supported" %}
+                    {% end %}
 
-      {% if flag?(:gnu) && flag?(:i386) %}
-        # This is a workaround for glibc bug: https://sourceware.org/bugzilla/show_bug.cgi?id=18635
-        # The unwind info is corrupted when `makecontext` is used.
-        # Stop the backtrace here. There is nothing interest beyond this point anyway.
-        if CallStack.makecontext_range.includes?(ip)
-          return LibUnwind::ReasonCode::END_OF_STACK
-        end
-      {% end %}
+      stack_frame = LibC::STACKFRAME64.new
+      stack_frame.addrPC.mode = LibC::ADDRESS_MODE::AddrModeFlat
+      stack_frame.addrFrame.mode = LibC::ADDRESS_MODE::AddrModeFlat
+      stack_frame.addrStack.mode = LibC::ADDRESS_MODE::AddrModeFlat
 
-      LibUnwind::ReasonCode::NO_REASON
+      stack_frame.addrPC.offset = context.value.rip
+      stack_frame.addrFrame.offset = context.value.rbp
+      stack_frame.addrStack.offset = context.value.rsp
+
+      last_frame = nil
+      cur_proc = LibC.GetCurrentProcess
+      cur_thread = LibC.GetCurrentThread
+
+      buf.each_index do |i|
+        ret = LibC.StackWalk64(
+          machine_type,
+          cur_proc,
+          cur_thread,
+          pointerof(stack_frame),
+          context,
+          nil,
+          nil, # ->LibC.SymFunctionTableAccess64,
+          nil, # ->LibC.SymGetModuleBase64,
+          nil
+        )
+        break if ret == 0
+
+        ip = Pointer(Void).new(stack_frame.addrPC.offset)
+        buf.unsafe_put(i, ip)
+      end
     end
+  {% else %}
+    {% if flag?(:interpreted) %} @[Primitive(:interpreter_call_stack_unwind)] {% end %}
+    def self.unwind_to(buf : Slice(Void*)) : Nil
+      callstack = {buf.to_unsafe, buf.to_unsafe + buf.size}
+      backtrace_fn = ->(context : LibUnwind::Context, data : Void*) do
+        b, e = data.as({Void**, Void**}*).value
+        return LibUnwind::ReasonCode::END_OF_STACK if b >= e
+        data.as({Void**, Void**}*).value = {b + 1, e}
 
-    LibUnwind.backtrace(backtrace_fn, pointerof(callstack).as(Void*))
-  end
+        ip = {% if flag?(:arm) %}
+              Pointer(Void).new(__crystal_unwind_get_ip(context))
+            {% else %}
+              Pointer(Void).new(LibUnwind.get_ip(context))
+            {% end %}
+        b.value = ip
+
+        {% if flag?(:gnu) && flag?(:i386) %}
+          # This is a workaround for glibc bug: https://sourceware.org/bugzilla/show_bug.cgi?id=18635
+          # The unwind info is corrupted when `makecontext` is used.
+          # Stop the backtrace here. There is nothing interest beyond this point anyway.
+          if CallStack.makecontext_range.includes?(ip)
+            return LibUnwind::ReasonCode::END_OF_STACK
+          end
+        {% end %}
+
+        LibUnwind::ReasonCode::NO_REASON
+      end
+
+      LibUnwind.backtrace(backtrace_fn, pointerof(callstack).as(Void*))
+    end
+  {% end %}
 end
