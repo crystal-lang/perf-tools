@@ -330,8 +330,9 @@ module PerfTools::MemProf
   #
   # This is the same per-object "size" defined in `.log_object_sizes`.
   #
-  # If *object* is not allocated on the heap, returns zero. Under normal
-  # circumstances, this only happens to string literals.
+  # Returns zero for string literals, as they are never allocated on the heap.
+  # Might also return zero for certain constants which are initialized before
+  # `MemProf` is activated.
   def self.object_size(object : Reference) : UInt64
     alloc_infos = self.alloc_infos
     return 0_u64 unless info = alloc_infos[object.object_id]?
