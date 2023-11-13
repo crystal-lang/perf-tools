@@ -326,10 +326,19 @@ module PerfTools::MemProf
     end
   end
 
-  private def self.reachable_set_size(ptr : Void*, size : Int) : UInt64
+  # Returns the total number of heap bytes occupied by *object*.
+  #
+  # This is the same per-object "size" defined in `.log_object_sizes`.
+  #
+  # Returns zero for string literals, as they are never allocated on the heap.
+  # Might also return zero for certain constants which are initialized before
+  # `MemProf` is activated.
+  def self.object_size(object : Reference) : UInt64
     alloc_infos = self.alloc_infos
+    return 0_u64 unless info = alloc_infos[object.object_id]?
+
     referenced = PerfTools::Intervals.new
-    referenced.add(ptr.address, size)
+    referenced.add(object.object_id, info.size)
     frontier = referenced.dup
 
     until frontier.empty?
