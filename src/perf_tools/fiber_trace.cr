@@ -8,6 +8,9 @@ module PerfTools::FiberTrace
   # :nodoc:
   class_getter yield_stack = {} of Fiber => Array(Void*)
 
+  # :nodoc:
+  class_getter parent = {} of Fiber => Fiber
+
   {% begin %}
     # The maximum number of stack frames shown for `FiberTrace.log_fibers` and
     # `FiberTrace.pretty_log_fibers`.
@@ -168,11 +171,57 @@ module PerfTools::FiberTrace
       io << " |\n"
     end
   end
+
+  def self.pretty_log_hierarchy(io : IO) : Nil
+    parents = self.parent.dup
+
+    main_fibers = [] of Fiber
+    Thread.unsafe_each do |thread|
+      main_fibers << thread.main_fiber
+    end
+
+    orphaned_parents = Set(Fiber).new
+    parents.each_value do |fiber|
+      next if parents.has_key?(fiber) # keys of `parents` are all active fibers
+      next if fiber.in?(main_fibers)  # main fiber of a thread is never an orphan
+      orphaned_parents << fiber
+    end
+
+    child_tree = parents.group_by(&.last).transform_values(&.map(&.first))
+
+    main_fibers.each do |main_fiber|
+      print_hierarchy(io, main_fiber, child_tree, 0)
+    end
+
+    unless orphaned_parents.empty?
+      io << "(orphaned)\n"
+      orphaned_parents.each do |parent|
+        child_tree.delete(parent).try &.each do |root|
+          print_hierarchy(io, root, child_tree, 1)
+        end
+      end
+    end
+
+    raise "BUG: not all fibers were visited!" unless child_tree.empty?
+  end
+
+  private def self.print_hierarchy(io : IO, root : Fiber, child_tree : Hash(Fiber, Array(Fiber)), indent : Int)
+    indent.times { io << "  " }
+    root.inspect(io)
+    io << '\n'
+
+    child_tree.delete(root).try &.each do |child|
+      print_hierarchy(io, child, child_tree, indent + 1)
+    end
+  end
 end
 
 class Fiber
   def initialize(@name : String? = nil, &@proc : ->)
     previous_def(name, &proc)
+
+    current_fiber = Thread.current.scheduler.@current
+    PerfTools::FiberTrace.parent[self] = current_fiber
 
     stack = Array.new(PerfTools::FiberTrace::STACK_DEPTH + PerfTools::FiberTrace::STACK_SKIP_SPAWN, Pointer(Void).null)
     Exception::CallStack.unwind_to(Slice.new(stack.to_unsafe, stack.size))
@@ -186,6 +235,7 @@ class Fiber
   def self.inactive(fiber : Fiber)
     PerfTools::FiberTrace.spawn_stack.delete(fiber)
     PerfTools::FiberTrace.yield_stack.delete(fiber)
+    PerfTools::FiberTrace.parent.delete(fiber)
     previous_def
   end
 
