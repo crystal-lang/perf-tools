@@ -168,19 +168,23 @@ module PerfTools::FiberTrace
       io << " |\n"
     end
   end
+
+  # :nodoc:
+  macro track_fiber(action, current_fiber)
+    stack = Array.new(PerfTools::FiberTrace::STACK_DEPTH + PerfTools::FiberTrace::STACK_SKIP_{{action.upcase.id}}, Pointer(Void).null)
+    Exception::CallStack.unwind_to(Slice.new(stack.to_unsafe, stack.size))
+    stack.truncate(PerfTools::FiberTrace::STACK_SKIP_{{action.upcase.id}}..)
+    while stack.last? == Pointer(Void).null
+      stack.pop
+    end
+    PerfTools::FiberTrace.{{action.id}}_stack[{{current_fiber}}] = stack
+  end
 end
 
 class Fiber
   def initialize(@name : String? = nil, &@proc : ->)
     previous_def(name, &proc)
-
-    stack = Array.new(PerfTools::FiberTrace::STACK_DEPTH + PerfTools::FiberTrace::STACK_SKIP_SPAWN, Pointer(Void).null)
-    Exception::CallStack.unwind_to(Slice.new(stack.to_unsafe, stack.size))
-    stack.truncate(PerfTools::FiberTrace::STACK_SKIP_SPAWN..)
-    while stack.last? == Pointer(Void).null
-      stack.pop
-    end
-    PerfTools::FiberTrace.spawn_stack[self] = stack
+    PerfTools::FiberTrace.track_fiber(:spawn, self)
   end
 
   def self.inactive(fiber : Fiber)
@@ -227,13 +231,15 @@ end
 
 class Crystal::Scheduler
   protected def resume(fiber : Fiber) : Nil
-    stack = Array.new(PerfTools::FiberTrace::STACK_DEPTH + PerfTools::FiberTrace::STACK_SKIP_YIELD, Pointer(Void).null)
-    Exception::CallStack.unwind_to(Slice.new(stack.to_unsafe, stack.size))
-    stack.truncate(PerfTools::FiberTrace::STACK_SKIP_YIELD..)
-    while stack.last? == Pointer(Void).null
-      stack.pop
-    end
-    PerfTools::FiberTrace.yield_stack[@current] = stack
+    {% begin %}
+      {% if Crystal::Scheduler.instance_vars.any? { |x| x.name == :thread.id } %}
+        # crystal >= 1.13
+        %current_fiber = @thread.current_fiber
+      {% else %}
+        %current_fiber = @current
+      {% end %}
+      PerfTools::FiberTrace.track_fiber(:yield, %current_fiber)
+    {% end %}
 
     previous_def
   end
