@@ -233,16 +233,13 @@ class Crystal::Scheduler
     while stack.last? == Pointer(Void).null
       stack.pop
     end
-    {% begin %}
-      {% if Crystal::Scheduler.instance_vars.any? { |x| x.name == :thread.id } %}
-        # crystal >= 1.13
-        %current_fiber = @thread.current_fiber
-      {% else %}
-        %current_fiber = @current
-      {% end %}
-      PerfTools::FiberTrace.yield_stack[%current_fiber] = stack
-    {% end %}
-
+    current_fiber = {% if Crystal::Scheduler.instance_vars.any? { |x| x.name == :thread.id } %}
+                      # crystal >= 1.13
+                      @thread.current_fiber
+                    {% else %}
+                      @current
+                    {% end %}
+    PerfTools::FiberTrace.yield_stack[current_fiber] = stack
     previous_def
   end
 end
