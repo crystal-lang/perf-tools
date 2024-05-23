@@ -8,6 +8,9 @@ module PerfTools::FiberTrace
   # :nodoc:
   class_getter yield_stack = {} of Fiber => Array(Void*)
 
+  # :nodoc:
+  class_getter lock = Thread::Mutex.new
+
   {% begin %}
     # The maximum number of stack frames shown for `FiberTrace.log_fibers` and
     # `FiberTrace.pretty_log_fibers`.
@@ -96,20 +99,22 @@ module PerfTools::FiberTrace
   #
   # NOTE: The main fiber of each thread is not shown.
   def self.log_fibers(io : IO) : Nil
-    io << spawn_stack.size << '\n'
-    spawn_stack.each do |fiber, stack|
-      io << fiber.name << '\n'
+    lock.synchronize do
+      io << spawn_stack.size << '\n'
+      spawn_stack.each do |fiber, stack|
+        io << fiber.name << '\n'
 
-      s = Exception::CallStack.new(__callstack: stack).printable_backtrace
-      io << s.size << '\n'
-      s.each { |frame| io << frame << '\n' }
+        s = Exception::CallStack.new(__callstack: stack).printable_backtrace
+        io << s.size << '\n'
+        s.each { |frame| io << frame << '\n' }
 
-      if yield_stack = self.yield_stack[fiber]?
-        y = Exception::CallStack.new(__callstack: yield_stack).printable_backtrace
-        io << y.size << '\n'
-        y.each { |frame| io << frame << '\n' }
-      else
-        io << '0' << '\n'
+        if yield_stack = self.yield_stack[fiber]?
+          y = Exception::CallStack.new(__callstack: yield_stack).printable_backtrace
+          io << y.size << '\n'
+          y.each { |frame| io << frame << '\n' }
+        else
+          io << '0' << '\n'
+        end
       end
     end
   end
@@ -140,32 +145,34 @@ module PerfTools::FiberTrace
   #
   # NOTE: The main fiber of each thread is not shown.
   def self.pretty_log_fibers(io : IO) : Nil
-    uniqs = spawn_stack
-      .map { |fiber, stack| {fiber.name, stack, yield_stack[fiber]?} }
-      .group_by { |_, s, y| {s, y} }
-      .transform_values(&.map { |fiber, _, _| fiber })
-      .to_a
-      .sort_by! { |(s, y), names| {-names.size, s, y || Array(Void*).new} }
+    lock.synchronize do
+      uniqs = spawn_stack
+        .map { |fiber, stack| {fiber.name, stack, yield_stack[fiber]?} }
+        .group_by { |_, s, y| {s, y} }
+        .transform_values(&.map { |fiber, _, _| fiber })
+        .to_a
+        .sort_by! { |(s, y), names| {-names.size, s, y || Array(Void*).new} }
 
-    io.puts "| Count | Fibers | Spawn stack | Yield stack |"
-    io.puts "|------:|:-------|:------------|:------------|"
-    uniqs.each do |(s, y), names|
-      s = Exception::CallStack.new(__callstack: s).printable_backtrace
-      y = y.try { |y| Exception::CallStack.new(__callstack: y).printable_backtrace }
+      io.puts "| Count | Fibers | Spawn stack | Yield stack |"
+      io.puts "|------:|:-------|:------------|:------------|"
+      uniqs.each do |(s, y), names|
+        s = Exception::CallStack.new(__callstack: s).printable_backtrace
+        y = y.try { |y| Exception::CallStack.new(__callstack: y).printable_backtrace }
 
-      io << "| "
-      io << names.size
-      io << " | "
-      names.compact.join(io, ' ') { |name| PerfTools.md_code_span(io, name) }
-      io << " | "
-      s.join(io, "<br>") { |frame| PerfTools.md_code_span(io, frame) }
-      io << " | "
-      if y
-        y.join(io, "<br>") { |frame| PerfTools.md_code_span(io, frame) }
-      else
-        io << "*N/A*"
+        io << "| "
+        io << names.size
+        io << " | "
+        names.compact.join(io, ' ') { |name| PerfTools.md_code_span(io, name) }
+        io << " | "
+        s.join(io, "<br>") { |frame| PerfTools.md_code_span(io, frame) }
+        io << " | "
+        if y
+          y.join(io, "<br>") { |frame| PerfTools.md_code_span(io, frame) }
+        else
+          io << "*N/A*"
+        end
+        io << " |\n"
       end
-      io << " |\n"
     end
   end
 
@@ -177,7 +184,9 @@ module PerfTools::FiberTrace
     while stack.last? == Pointer(Void).null
       stack.pop
     end
-    PerfTools::FiberTrace.{{action.id}}_stack[{{current_fiber}}] = stack
+    PerfTools::FiberTrace.lock.synchronize do
+      PerfTools::FiberTrace.{{action.id}}_stack[{{current_fiber}}] = stack
+    end
   end
 end
 
@@ -188,8 +197,10 @@ class Fiber
   end
 
   def self.inactive(fiber : Fiber)
-    PerfTools::FiberTrace.spawn_stack.delete(fiber)
-    PerfTools::FiberTrace.yield_stack.delete(fiber)
+    PerfTools::FiberTrace.lock.synchronize do
+      PerfTools::FiberTrace.spawn_stack.delete(fiber)
+      PerfTools::FiberTrace.yield_stack.delete(fiber)
+    end
     previous_def
   end
 
