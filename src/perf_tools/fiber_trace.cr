@@ -178,14 +178,14 @@ module PerfTools::FiberTrace
 
   # :nodoc:
   macro track_fiber(action, current_fiber)
-    stack = Array.new(PerfTools::FiberTrace::STACK_DEPTH + PerfTools::FiberTrace::STACK_SKIP_{{action.upcase.id}}, Pointer(Void).null)
-    Exception::CallStack.unwind_to(Slice.new(stack.to_unsafe, stack.size))
-    stack.truncate(PerfTools::FiberTrace::STACK_SKIP_{{action.upcase.id}}..)
-    while stack.last? == Pointer(Void).null
-      stack.pop
+    %stack = Array.new(PerfTools::FiberTrace::STACK_DEPTH + PerfTools::FiberTrace::STACK_SKIP_{{action.upcase.id}}, Pointer(Void).null)
+    Exception::CallStack.unwind_to(Slice.new(%stack.to_unsafe, %stack.size))
+    %stack.truncate(PerfTools::FiberTrace::STACK_SKIP_{{action.upcase.id}}..)
+    while %stack.last? == Pointer(Void).null
+      %stack.pop
     end
     PerfTools::FiberTrace.lock.synchronize do
-      PerfTools::FiberTrace.{{action.id}}_stack[{{current_fiber}}] = stack
+      PerfTools::FiberTrace.{{action.id}}_stack[{{current_fiber}}] = %stack
     end
   end
 end
