@@ -37,7 +37,7 @@ module PerfTools::SchedulerTrace
   #
   # Set `details` to true to print individual fiber details.
   def self.print_runtime_status(details = false) : Nil
-    GC.stop_world
+    Thread.stop_world
 
     Crystal::System.print_error("sched.details time=%u\n", Crystal::System::Time.ticks)
 
@@ -45,7 +45,7 @@ module PerfTools::SchedulerTrace
       print_runtime_status(execution_context, details)
     end
 
-    GC.start_world
+    Thread.start_world
   end
 
   private def self.print_runtime_status(execution_context : ExecutionContext::MultiThreaded, details = false) : Nil
