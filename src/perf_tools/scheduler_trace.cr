@@ -50,9 +50,9 @@ module PerfTools::SchedulerTrace
 
   private def self.print_runtime_status(execution_context : ExecutionContext::MultiThreaded, details = false) : Nil
     Crystal::System.print_error("%s name=%s global_queue.size=%d\n",
-                                execution_context.class.name,
-                                execution_context.name,
-                                execution_context.@global_queue.size)
+      execution_context.class.name,
+      execution_context.name,
+      execution_context.@global_queue.size)
 
     execution_context.@threads.each do |thread|
       print_runtime_status(thread, details)
@@ -69,9 +69,9 @@ module PerfTools::SchedulerTrace
 
   private def self.print_runtime_status(execution_context : ExecutionContext::SingleThreaded, details = false) : Nil
     Crystal::System.print_error("%s name=%s global_queue.size=%d\n",
-                                execution_context.class.name,
-                                execution_context.name,
-                                execution_context.@global_queue.size)
+      execution_context.class.name,
+      execution_context.name,
+      execution_context.@global_queue.size)
 
     print_runtime_status(execution_context.@thread, details)
 
@@ -97,31 +97,31 @@ module PerfTools::SchedulerTrace
         thread.@system_handle
       {% end %}
 
-      case scheduler = thread.current_scheduler?
-      when ExecutionContext::MultiThreaded::Scheduler
-        Crystal::System.print_error("  Scheduler name=%s thread=%p local_queue.size=%u status=%s\n",
-                                    scheduler.name,
-                                    thread_handle,
-                                    scheduler.@runnables.size,
-                                    scheduler.status)
-      when ExecutionContext::SingleThreaded
-        Crystal::System.print_error("  Scheduler name=%s thread=%p local_queue.size=%u status=%s\n",
-                                    scheduler.name,
-                                    thread_handle,
-                                    scheduler.@runnables.size,
-                                    scheduler.status)
-      when ExecutionContext::Isolated
-        Crystal::System.print_error("  Scheduler name=%s thread=%p status=%s\n",
-                                    scheduler.name,
-                                    thread_handle,
-                                    scheduler.status)
-      end
+    case scheduler = thread.current_scheduler?
+    when ExecutionContext::MultiThreaded::Scheduler
+      Crystal::System.print_error("  Scheduler name=%s thread=%p local_queue.size=%u status=%s\n",
+        scheduler.name,
+        thread_handle,
+        scheduler.@runnables.size,
+        scheduler.status)
+    when ExecutionContext::SingleThreaded
+      Crystal::System.print_error("  Scheduler name=%s thread=%p local_queue.size=%u status=%s\n",
+        scheduler.name,
+        thread_handle,
+        scheduler.@runnables.size,
+        scheduler.status)
+    when ExecutionContext::Isolated
+      Crystal::System.print_error("  Scheduler name=%s thread=%p status=%s\n",
+        scheduler.name,
+        thread_handle,
+        scheduler.status)
+    end
 
-      return unless details
+    return unless details
 
-      if fiber = thread.current_fiber?
-        Crystal::System.print_error("    Fiber %p name=%s status=running\n", fiber.as(Void*), fiber.name)
-      end
+    if fiber = thread.current_fiber?
+      Crystal::System.print_error("    Fiber %p name=%s status=running\n", fiber.as(Void*), fiber.name)
+    end
   end
 
   # TODO: print the fiber status: running, queued (local, global), sleeping, suspended, ...
