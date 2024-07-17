@@ -117,18 +117,21 @@ module PerfTools::MemProf
     {} of Int32 => UInt64
   end
 
+  record KnownClass, name : String, fields_offsets : Hash(Int32, String)?
   # :nodoc:
-  class_getter known_classes : Hash(Int32, String) do
-    {} of Int32 => String
+  class_getter known_classes : Hash(Int32, KnownClass) do
+    {} of Int32 => KnownClass
   end
 
   @@last_type_id = 0
   @@last_type_name : String?
+  @@last_type_fields : Hash(Int32, String)? = nil
 
   # :nodoc:
-  def self.set_type(type : T.class, &) forall T
+  def self.set_type(type : T.class, ivars : Hash(Int32, String)?, &) forall T
     @@last_type_id = T.crystal_instance_type_id
     @@last_type_name = T.name
+    @@last_type_fields = ivars
     yield
   end
 
@@ -144,7 +147,7 @@ module PerfTools::MemProf
         unless type_id == 0
           obj_counts = self.obj_counts
           obj_counts[type_id] = obj_counts.fetch(type_id, 0_u64) &+ 1
-          known_classes[type_id] = @@last_type_name.not_nil!
+          known_classes[type_id] = KnownClass.new @@last_type_name.not_nil!, @@last_type_fields
         end
       end
     end
@@ -217,10 +220,10 @@ module PerfTools::MemProf
       end
 
       io << lines << '\n'
-      known_classes.each do |type_id, name|
+      known_classes.each do |type_id, klass|
         count = obj_counts.fetch(type_id, 0_u64)
         next unless count > 0
-        io << count << '\t' << name << '\n'
+        io << count << '\t' << klass.name << '\n'
       end
     end
   end
@@ -316,8 +319,8 @@ module PerfTools::MemProf
       io << counts.size << '\n'
       counts.each do |type_id, bytes|
         io << bytes << '\t'
-        if name = known_classes[type_id]?
-          io << name
+        if klass = known_classes[type_id]?
+          io << klass.name
         else
           io << "(class " << type_id << ")"
         end
@@ -326,7 +329,7 @@ module PerfTools::MemProf
     end
   end
 
-  def self.log_referred_object_by_type(io : IO, type : T.class, md = false) : Nil forall T
+  def self.log_objects_linked_to_type(io : IO, type : T.class, mermaid = false) : Nil forall T
     GC.collect
     stopping do
       type_id = T.crystal_instance_type_id
@@ -336,7 +339,7 @@ module PerfTools::MemProf
       end
       pointers = references.keys
 
-      referees = Array({UInt64, UInt64}).new
+      referees = Array({UInt64, UInt64, String}).new
 
       visited = [] of {UInt64, UInt64}
 
@@ -352,13 +355,16 @@ module PerfTools::MemProf
         until stack.empty?
           subptr, size = stack.pop
           visited << {subptr, size}
-
+          offset = -sizeof(Void*)
           each_inner_pointer(Pointer(Void*).new(subptr), size) do |subptr|
-            next unless subinfo = alloc_infos[subptr.address]?
+            offset += sizeof(Void*); next unless subinfo = alloc_infos[subptr.address]?
             if pointers.includes? subptr.address
-              # we found a link, add the chain
-              pointers << ptr
-              referees << {ptr, subptr.address}
+              field = known_classes[info.type_id]?.try(&.fields_offsets.try { |fo| fo[offset]? }) || "(field #{offset})"
+              tuple = {ptr, subptr.address, field}
+              unless referees.includes? tuple
+                pointers << ptr
+                referees << tuple
+              end
             elsif !subinfo.atomic && !visited.any? { |addr, size| addr == subptr.address }
               stack << {subptr.address, subinfo.size}
             end
@@ -366,20 +372,20 @@ module PerfTools::MemProf
         end
       end
 
-      if md
+      if mermaid
         io << "graph LR\n"
       else
         io << referees.size << '\n'
       end
 
       referees.each do |ref|
-        info = alloc_infos[ref[0]]
-        name = known_classes[info.type_id]? || "(class #{info.type_id})"
-
-        if md
-          io << "  " << ref[0] << "(" << ref[0] << " " << name << ") --> " << ref[1] << "\n"
+        from, to, field = ref
+        info = alloc_infos[from]
+        name = known_classes[info.type_id]?.try(&.name) || "(class #{info.type_id})"
+        if mermaid
+          io << "  " << from << "[\"" << from << " " << name << "(" << field << ")\"] --> " << to << "\n"
         else
-          io << ref[0] << '\t' << name << "\t" << ref[1] << '\n'
+          io << from << '\t' << name << "\t" << to << '\n'
         end
       end
     end
@@ -587,7 +593,7 @@ end
       class {{ type }}
         # :nodoc:
         def self.allocate
-          PerfTools::MemProf.set_type(self) { previous_def }
+          PerfTools::MemProf.set_type(self, nil) { previous_def }
         end
       end
     {% end %}
@@ -598,7 +604,19 @@ class Reference
   macro inherited
     # :nodoc:
     def self.allocate
-      PerfTools::MemProf.set_type(self) { previous_def }
+      PerfTools::MemProf.set_type(self, self._fields_offsets) { previous_def }
     end
+  end
+end
+
+class Object
+  def self._fields_offsets
+    {% begin %}
+    {
+      {% for field in @type.instance_vars %}
+        offsetof({{@type}}, @{{ field.name }}) => "{{ field.name.id }}",
+      {% end %}
+    } of Int32 => String
+    {% end %}
   end
 end
