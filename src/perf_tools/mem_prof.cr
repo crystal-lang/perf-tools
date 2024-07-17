@@ -614,8 +614,10 @@ class Object
   def self._fields_offsets
     {% begin %}
     {
-      {% for field in @type.instance_vars %}
-        offsetof({{@type}}, @{{ field.name }}) => "{{ field.name.id }}",
+      {% unless @type.private? %}
+        {% for field in @type.instance_vars %}
+          offsetof({{@type}}, @{{ field.name }}) => "{{ field.name.id }}",
+        {% end %}
       {% end %}
     } of Int32 => String
     {% end %}
