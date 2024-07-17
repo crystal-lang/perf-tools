@@ -357,7 +357,8 @@ module PerfTools::MemProf
           visited << {subptr, size}
           offset = -sizeof(Void*)
           each_inner_pointer(Pointer(Void*).new(subptr), size) do |subptr|
-            offset += sizeof(Void*); next unless subinfo = alloc_infos[subptr.address]?
+            offset += sizeof(Void*)
+            next unless subinfo = alloc_infos[subptr.address]?
             if pointers.includes? subptr.address
               field = known_classes[info.type_id]?.try(&.fields_offsets.try { |fo| fo[offset]? }) || "(field #{offset})"
               tuple = {ptr, subptr.address, field}
@@ -383,7 +384,7 @@ module PerfTools::MemProf
         info = alloc_infos[from]
         name = known_classes[info.type_id]?.try(&.name) || "(class #{info.type_id})"
         if mermaid
-          io << "  " << from << "[\"" << from << " " << name << "(" << field << ")\"] --> " << to << "\n"
+          io << "  0x" << from.to_s(16) << "[\"0x" << from.to_s(16) << " " << name << "\"] --@" << field << "--> 0x" << to.to_s(16) << "\n"
         else
           io << from << '\t' << name << "\t" << to << '\n'
         end
