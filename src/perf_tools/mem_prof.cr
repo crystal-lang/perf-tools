@@ -334,41 +334,78 @@ module PerfTools::MemProf
     stopping do
       type_id = T.crystal_instance_type_id
       alloc_infos = self.alloc_infos
-      references = alloc_infos.select do |_, info|
-        info.type_id == type_id
-      end
+      references = alloc_infos.select { |_, info| info.type_id == type_id }
       pointers = references.keys
 
       referees = Array({UInt64, UInt64, String}).new
 
-      visited = [] of {UInt64, UInt64}
+      visited = [] of UInt64
 
       alloc_infos.each do |ptr, info|
+        # puts "addr: 0x#{ptr.to_s(16)}, size: #{info.size}, type_id: #{known_classes[info.type_id]?.try(&.name)}, atomic: #{info.atomic}"
         next if info.type_id == 0 # skip allocations with no type info
 
         next if info.atomic
 
-        next if visited.any? { |addr, _| addr == ptr }
+        next if visited.includes? ptr
 
-        stack = [{ptr, info.size}]
+        # print = false
+        # if known_classes[info.type_id]?.try(&.name).to_s.includes? "D(D(Int32))"
+        #   print = true
+        #   pointers.each do |p|
+        #     puts "  addr: 0x#{p.to_s(16)}"
+        #   end
+
+        #   puts Pointer(D(D(Int32))).new(ptr).as(D(D(Int32))).@c1
+        #   puts Pointer(Void**).new(ptr).as(D(D(Int32))).@c1
+        #   puts Pointer(Void**).new(ptr + 8).as(D(Int32)).@c1
+        #   puts (Pointer(Void**).new(ptr) + 1).as(D(Int32)).@c1
+        #   puts "0x" + ptr.to_s(16)
+        #   puts "0x" + Pointer(Void**).new(ptr + 8).address.to_s(16)
+        #   puts "0x" + (Pointer(Void**).new(ptr) + 1).address.to_s(16)
+        #   puts "0x" + (Pointer(Void**).new(ptr) + 1).value.address.to_s(16)
+        # end
+
+        # special case for Array
+        is_array = known_classes[info.type_id]?.try(&.name).to_s.starts_with? "Array("
+        if is_array
+          arr = Pointer(Array(Void**)).new(ptr).as(Array(Void**))
+          stack = [{ptr, offsetof(Array(Void**), @buffer), info.size}, {arr.to_unsafe.address, -sizeof(Void*), (arr.size * sizeof(Void*)).to_u64}]
+        else
+          stack = [{ptr, 0, info.size}]
+        end
 
         until stack.empty?
-          subptr, size = stack.pop
-          visited << {subptr, size}
-          offset = -sizeof(Void*)
-          each_inner_pointer(Pointer(Void*).new(subptr), size) do |subptr|
-            offset += sizeof(Void*)
-            next unless subinfo = alloc_infos[subptr.address]?
-            if pointers.includes? subptr.address
-              field = known_classes[info.type_id]?.try(&.fields_offsets.try { |fo| fo[offset]? }) || "(field #{offset})"
-              tuple = {ptr, subptr.address, field}
+          ptr, offset, size = stack.pop
+          offset += sizeof(Void*) # we know that at 0 there is the type_id, no need to check it
+
+          next if offset >= size
+
+          stack << {ptr, offset, size}
+          subptr = (Pointer(Void**).new(ptr + offset)).value.address
+          # puts "subptr: 0x#{subptr.to_s(16)}" if print
+          visited << subptr
+
+          if pointers.includes? subptr
+            stack << {subptr, 0, 0_u64}
+            stack.each_cons_pair do |from, to|
+              from_ptr, from_offset, _ = from
+              to_ptr, _, _ = to
+              info = alloc_infos[from_ptr]
+              field = known_classes[info.type_id]?.try(&.fields_offsets.try { |fo| fo[from_offset]? }) || "(field #{from_offset})"
+              tuple = {from_ptr, to_ptr, field}
               unless referees.includes? tuple
-                pointers << ptr
+                pointers << from_ptr
+                pointers << to_ptr
                 referees << tuple
               end
-            elsif !subinfo.atomic && !visited.any? { |addr, size| addr == subptr.address }
-              stack << {subptr.address, subinfo.size}
             end
+            stack.pop
+          elsif (subinfo = alloc_infos[subptr]?) && !subinfo.atomic && !visited.includes? subptr
+            stack << {subptr, 0, subinfo.size}
+            # stack.each do |s|
+            #   puts "  addr: 0x#{s[0].to_s(16)}, size: #{s[2]}, type_id: #{known_classes[alloc_infos[s[0]].type_id]?.try(&.name)}, atomic: #{alloc_infos[s[0]].atomic}"
+            # end
           end
         end
       end
