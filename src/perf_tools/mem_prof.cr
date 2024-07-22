@@ -140,6 +140,7 @@ module PerfTools::MemProf
     if running?
       stopping do
         type_id, @@last_type_id = @@last_type_id, 0
+
         stack = StaticArray(Void*, STACK_TOTAL).new(Pointer(Void).null)
         Exception::CallStack.unwind_to(stack.to_slice)
         key = StaticArray(UInt64, STACK_DEPTH).new { |i| stack.unsafe_fetch(STACK_SKIP &+ i).address }
@@ -342,39 +343,13 @@ module PerfTools::MemProf
       visited = [] of UInt64
 
       alloc_infos.each do |ptr, info|
-        # puts "addr: 0x#{ptr.to_s(16)}, size: #{info.size}, type_id: #{known_classes[info.type_id]?.try(&.name)}, atomic: #{info.atomic}"
-        next if info.type_id == 0 # skip allocations with no type info
-
         next if info.atomic
 
         next if visited.includes? ptr
 
-        # print = false
-        # if known_classes[info.type_id]?.try(&.name).to_s.includes? "D(D(Int32))"
-        #   print = true
-        #   pointers.each do |p|
-        #     puts "  addr: 0x#{p.to_s(16)}"
-        #   end
+        init = info.type_id == 0 ? -sizeof(Void*) : 0
 
-        #   puts Pointer(D(D(Int32))).new(ptr).as(D(D(Int32))).@c1
-        #   puts Pointer(Void**).new(ptr).as(D(D(Int32))).@c1
-        #   puts Pointer(Void**).new(ptr + 8).as(D(Int32)).@c1
-        #   puts (Pointer(Void**).new(ptr) + 1).as(D(Int32)).@c1
-        #   puts "0x" + ptr.to_s(16)
-        #   puts "0x" + Pointer(Void**).new(ptr + 8).address.to_s(16)
-        #   puts "0x" + (Pointer(Void**).new(ptr) + 1).address.to_s(16)
-        #   puts "0x" + (Pointer(Void**).new(ptr) + 1).value.address.to_s(16)
-        # end
-
-        # special case for Array
-        is_array = known_classes[info.type_id]?.try(&.name).to_s.starts_with? "Array("
-        if is_array
-          arr = Pointer(Array(Void**)).new(ptr).as(Array(Void**))
-          stack = [{ptr, offsetof(Array(Void**), @buffer), info.size}, {arr.to_unsafe.address, -sizeof(Void*), (arr.size * sizeof(Void*)).to_u64}]
-        else
-          stack = [{ptr, 0, info.size}]
-        end
-
+        stack = [{ptr, init, info.size}]
         until stack.empty?
           ptr, offset, size = stack.pop
           offset += sizeof(Void*) # we know that at 0 there is the type_id, no need to check it
@@ -382,17 +357,20 @@ module PerfTools::MemProf
           next if offset >= size
 
           stack << {ptr, offset, size}
-          subptr = (Pointer(Void**).new(ptr + offset)).value.address
-          # puts "subptr: 0x#{subptr.to_s(16)}" if print
-          visited << subptr
+          value_ptr = Pointer(Void*).new(ptr + offset)
+          subptr = value_ptr.value.address
 
           if pointers.includes? subptr
             stack << {subptr, 0, 0_u64}
             stack.each_cons_pair do |from, to|
               from_ptr, from_offset, _ = from
               to_ptr, _, _ = to
-              info = alloc_infos[from_ptr]
-              field = known_classes[info.type_id]?.try(&.fields_offsets.try { |fo| fo[from_offset]? }) || "(field #{from_offset})"
+              if info = alloc_infos[from_ptr]?
+                field = known_classes[info.type_id]?.try(&.fields_offsets.try { |fo| fo[from_offset]? }) || "(field #{from_offset})"
+              else
+                field = "(field #{from_offset})"
+              end
+
               tuple = {from_ptr, to_ptr, field}
               unless referees.includes? tuple
                 pointers << from_ptr
@@ -403,10 +381,9 @@ module PerfTools::MemProf
             stack.pop
           elsif (subinfo = alloc_infos[subptr]?) && !subinfo.atomic && !visited.includes? subptr
             stack << {subptr, 0, subinfo.size}
-            # stack.each do |s|
-            #   puts "  addr: 0x#{s[0].to_s(16)}, size: #{s[2]}, type_id: #{known_classes[alloc_infos[s[0]].type_id]?.try(&.name)}, atomic: #{alloc_infos[s[0]].atomic}"
-            # end
           end
+
+          visited << subptr
         end
       end
 
@@ -418,8 +395,11 @@ module PerfTools::MemProf
 
       referees.each do |ref|
         from, to, field = ref
-        info = alloc_infos[from]
-        name = known_classes[info.type_id]?.try(&.name) || "(class #{info.type_id})"
+        if info = alloc_infos[from]?
+          name = known_classes[info.type_id]?.try(&.name) || "(class #{info.type_id})"
+        else
+          name = "(class 0)"
+        end
         if mermaid
           io << "  0x" << from.to_s(16) << "[\"0x" << from.to_s(16) << " " << name << "\"] --@" << field << "--> 0x" << to.to_s(16) << "\n"
         else
