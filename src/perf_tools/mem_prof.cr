@@ -103,6 +103,13 @@ module PerfTools::MemProf
     # Configurable at build time using the `MEMPROF_REF_LIMIT` environment
     # variable.
     REF_LIMIT = {{ (env("MEMPROF_REF_LIMIT") || "10").to_i }}
+
+    # The maximum number of indirections to track `MemProf.log_objects_linked_to_type`.
+    # 0 is "unlimited".
+    #
+    # Configurable at build time using the `MEMPROF_REF_LEVEL` environment
+    # variable.
+    REF_LEVEL = {{ (env("MEMPROF_REF_LEVEL") || "10").to_i }}
   {% end %}
 
   {% begin %}
@@ -344,7 +351,8 @@ module PerfTools::MemProf
       pointers = alloc_infos
         .select { |_, info| info.type_id == type_id }
         .first(REF_LIMIT)
-        .map { |ptr, _| ptr }
+        .map { |ptr, _| {ptr, 0} }
+        .to_h
 
       referees = Array({UInt64, UInt64, String}).new
 
@@ -368,9 +376,10 @@ module PerfTools::MemProf
           value_ptr = Pointer(Void*).new(ptr + offset)
           subptr = value_ptr.value.address
 
-          if pointers.includes? subptr
+          if (level = pointers[subptr]?) && (REF_LEVEL == 0 || level < REF_LEVEL)
             stack << {subptr, 0, 0_u64}
-            stack.each_cons_pair do |from, to|
+
+            stack.reverse.each_cons_pair do |to, from|
               from_ptr, from_offset, _ = from
               to_ptr, _, _ = to
               if info = alloc_infos[from_ptr]?
@@ -381,10 +390,12 @@ module PerfTools::MemProf
 
               tuple = {from_ptr, to_ptr, field}
               unless referees.includes? tuple
-                pointers << from_ptr
-                pointers << to_ptr
+                pointers[from_ptr] = level + 1
+                pointers[to_ptr] = level
                 referees << tuple
               end
+              level += 1
+              break if level >= REF_LEVEL
             end
             stack.pop
           elsif (subinfo = alloc_infos[subptr]?) && !subinfo.atomic && !visited.includes? subptr
