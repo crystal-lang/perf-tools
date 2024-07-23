@@ -97,6 +97,12 @@ module PerfTools::MemProf
     # Configurable at run time using the `MEMPROF_PRINT_AT_EXIT` environment
     # variable.
     PRINT_AT_EXIT = ENV["MEMPROF_PRINT_AT_EXIT"]? == "1"
+
+    # The maximum number of objects to track in `MemProf.log_objects_linked_to_type`.
+    #
+    # Configurable at build time using the `MEMPROF_REF_LIMIT` environment
+    # variable.
+    REF_LIMIT = {{ (env("MEMPROF_REF_LIMIT") || "10").to_i }}
   {% end %}
 
   {% begin %}
@@ -330,14 +336,14 @@ module PerfTools::MemProf
     end
   end
 
-  def self.log_objects_linked_to_type(io : IO, type : T.class, mermaid = false, limit = 10) : Nil forall T
+  def self.log_objects_linked_to_type(io : IO, type : T.class, mermaid = false) : Nil forall T
     GC.collect
     stopping do
       type_id = T.crystal_instance_type_id
       alloc_infos = self.alloc_infos
       pointers = alloc_infos
         .select { |_, info| info.type_id == type_id }
-        .first(limit)
+        .first(REF_LIMIT)
         .map { |ptr, _| ptr }
 
       referees = Array({UInt64, UInt64, String}).new
