@@ -354,6 +354,8 @@ module PerfTools::MemProf
         .map { |ptr, _| {ptr, 0} }
 
       pointers = REF_LIMIT == 0 ? pointers.to_h : pointers.first(REF_LIMIT).to_h
+      original_pointers = pointers.dup.map { |ptr, _| ptr }
+
       referees = Array({UInt64, UInt64, String}).new
 
       visited = [] of UInt64
@@ -411,6 +413,13 @@ module PerfTools::MemProf
 
       if mermaid
         io << "graph LR\n"
+
+        original_pointers.each do |ptr|
+          if info = alloc_infos[ptr]?
+            name = known_classes[info.type_id]?.try(&.name) || "(class #{info.type_id})"
+            io << "  0x" << ptr.to_s(16) << "[\"0x" << ptr.to_s(16) << " " << name << "\"]\n"
+          end
+        end
       else
         io << referees.size << '\n'
       end
