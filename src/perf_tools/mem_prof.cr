@@ -99,17 +99,18 @@ module PerfTools::MemProf
     PRINT_AT_EXIT = ENV["MEMPROF_PRINT_AT_EXIT"]? == "1"
 
     # The maximum number of objects to track in `MemProf.log_objects_linked_to_type`.
+    # 0 is "unlimited". Defaults to 10.
     #
     # Configurable at build time using the `MEMPROF_REF_LIMIT` environment
     # variable.
     REF_LIMIT = {{ (env("MEMPROF_REF_LIMIT") || "10").to_i }}
 
     # The maximum number of indirections to track `MemProf.log_objects_linked_to_type`.
-    # 0 is "unlimited".
+    # 0 is "unlimited". Defaults to 5.
     #
     # Configurable at build time using the `MEMPROF_REF_LEVEL` environment
     # variable.
-    REF_LEVEL = {{ (env("MEMPROF_REF_LEVEL") || "10").to_i }}
+    REF_LEVEL = {{ (env("MEMPROF_REF_LEVEL") || "5").to_i }}
   {% end %}
 
   {% begin %}
@@ -350,10 +351,9 @@ module PerfTools::MemProf
       alloc_infos = self.alloc_infos
       pointers = alloc_infos
         .select { |_, info| info.type_id == type_id }
-        .first(REF_LIMIT)
         .map { |ptr, _| {ptr, 0} }
-        .to_h
 
+      pointers = REF_LIMIT == 0 ? pointers.to_h : pointers.first(REF_LIMIT).to_h
       referees = Array({UInt64, UInt64, String}).new
 
       visited = [] of UInt64
@@ -395,9 +395,11 @@ module PerfTools::MemProf
                 referees << tuple
               end
               level += 1
-              break if level >= REF_LEVEL
+              break if REF_LEVEL > 0 && level >= REF_LEVEL
             end
             stack.pop
+          elsif level
+            # do nothing
           elsif (subinfo = alloc_infos[subptr]?) && !subinfo.atomic && !visited.includes? subptr
             init = subinfo.type_id == 0 ? -sizeof(Void*) : 0
             stack << {subptr, init, subinfo.size}
