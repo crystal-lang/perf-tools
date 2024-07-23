@@ -330,13 +330,15 @@ module PerfTools::MemProf
     end
   end
 
-  def self.log_objects_linked_to_type(io : IO, type : T.class, mermaid = false) : Nil forall T
+  def self.log_objects_linked_to_type(io : IO, type : T.class, mermaid = false, limit = 10) : Nil forall T
     GC.collect
     stopping do
       type_id = T.crystal_instance_type_id
       alloc_infos = self.alloc_infos
-      references = alloc_infos.select { |_, info| info.type_id == type_id }
-      pointers = references.keys
+      pointers = alloc_infos
+        .select { |_, info| info.type_id == type_id }
+        .first(limit)
+        .map { |ptr, _| ptr }
 
       referees = Array({UInt64, UInt64, String}).new
 
@@ -380,7 +382,8 @@ module PerfTools::MemProf
             end
             stack.pop
           elsif (subinfo = alloc_infos[subptr]?) && !subinfo.atomic && !visited.includes? subptr
-            stack << {subptr, 0, subinfo.size}
+            init = subinfo.type_id == 0 ? -sizeof(Void*) : 0
+            stack << {subptr, init, subinfo.size}
           end
 
           visited << subptr
@@ -604,6 +607,7 @@ module GC
   end
 end
 
+# This is for the system allocated classes, which doesn't trigger the `inherited` macro
 {% begin %}
   {% types = Reference.all_subclasses %}
   {% for type in types %}
