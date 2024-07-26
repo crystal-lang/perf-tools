@@ -344,7 +344,7 @@ module PerfTools::MemProf
     end
   end
 
-  def self.log_objects_linked_to_type(io : IO, type : T.class, mermaid = false) : Nil forall T
+  def self.log_objects_linked_to_type(io : IO, type : T.class, mermaid = false) : Int32 forall T
     GC.collect
     stopping do
       type_id = T.crystal_instance_type_id
@@ -437,6 +437,7 @@ module PerfTools::MemProf
           io << from << '\t' << name << "\t" << to << '\n'
         end
       end
+      original_pointers.size
     end
   end
 
