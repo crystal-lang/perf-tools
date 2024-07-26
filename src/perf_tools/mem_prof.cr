@@ -101,16 +101,16 @@ module PerfTools::MemProf
     # The maximum number of objects to track in `MemProf.log_objects_linked_to_type`.
     # 0 is "unlimited". Defaults to 10.
     #
-    # Configurable at build time using the `MEMPROF_REF_LIMIT` environment
+    # Configurable at run time using the `MEMPROF_REF_LIMIT` environment
     # variable.
-    REF_LIMIT = {{ (env("MEMPROF_REF_LIMIT") || "10").to_i }}
+    REF_LIMIT = (ENV["MEMPROF_REF_LIMIT"]? || "10").to_i
 
     # The maximum number of indirections to track `MemProf.log_objects_linked_to_type`.
     # 0 is "unlimited". Defaults to 5.
     #
-    # Configurable at build time using the `MEMPROF_REF_LEVEL` environment
+    # Configurable at run time using the `MEMPROF_REF_LEVEL` environment
     # variable.
-    REF_LEVEL = {{ (env("MEMPROF_REF_LEVEL") || "5").to_i }}
+    REF_LEVEL = (ENV["MEMPROF_REF_LEVEL"]? || "5").to_i
   {% end %}
 
   {% begin %}
