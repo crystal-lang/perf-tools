@@ -356,7 +356,7 @@ module PerfTools::MemProf
       pointers = REF_LIMIT == 0 ? pointers.to_h : pointers.first(REF_LIMIT).to_h
       original_pointers = pointers.dup.map { |ptr, _| ptr }
 
-      referees = Array({UInt64, UInt64, String}).new
+      referees = Array({UInt64, UInt64, String, Int32}).new
 
       visited = [] of UInt64
 
@@ -390,7 +390,7 @@ module PerfTools::MemProf
                 field = "(field #{from_offset})"
               end
 
-              tuple = {from_ptr, to_ptr, field}
+              tuple = {from_ptr, to_ptr, field, level}
               unless referees.includes? tuple
                 pointers[from_ptr] = level + 1
                 pointers[to_ptr] = level
@@ -425,14 +425,14 @@ module PerfTools::MemProf
       end
 
       referees.each do |ref|
-        from, to, field = ref
+        from, to, field, level = ref
         if info = alloc_infos[from]?
           name = known_classes[info.type_id]?.try(&.name) || "(class #{info.type_id})"
         else
           name = "(class 0)"
         end
         if mermaid
-          io << "  0x" << from.to_s(16) << "[\"0x" << from.to_s(16) << " " << name << "\"] --@" << field << "--> 0x" << to.to_s(16) << "\n"
+          io << "  0x" << from.to_s(16) << "[\"0x" << from.to_s(16) << " " << name << "\"] --@" << field << "," << level << "--> 0x" << to.to_s(16) << "\n"
         else
           io << from << '\t' << name << "\t" << to << '\n'
         end
