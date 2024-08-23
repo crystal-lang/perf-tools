@@ -98,14 +98,14 @@ module PerfTools::MemProf
     # variable.
     PRINT_AT_EXIT = ENV["MEMPROF_PRINT_AT_EXIT"]? == "1"
 
-    # The maximum number of objects to track in `MemProf.log_objects_linked_to_type`.
+    # The maximum number of objects to track in `MemProf.pretty_log_object_graph`.
     # 0 is "unlimited". Defaults to 10.
     #
     # Configurable at run time using the `MEMPROF_REF_LIMIT` environment
     # variable.
     REF_LIMIT = (ENV["MEMPROF_REF_LIMIT"]? || "10").to_i
 
-    # The maximum number of indirections to track `MemProf.log_objects_linked_to_type`.
+    # The maximum number of indirections to track `MemProf.pretty_log_object_graph`.
     # 0 is "unlimited". Defaults to 5.
     #
     # Configurable at run time using the `MEMPROF_REF_LEVEL` environment
@@ -344,7 +344,57 @@ module PerfTools::MemProf
     end
   end
 
-  def self.log_objects_linked_to_type(io : IO, type : T.class, mermaid = false) : Int32 forall T
+  # Logs the objects that are transitively reachable to a given *type* of objects,
+  # outputing a mermaid graph to the given *io*. The graph contains an indication of
+  # the field that links an object, or its index if the field is not known.
+  #
+  # Example:
+  #
+  # ```
+  # class A
+  #   @bs = Array(B).new
+  #
+  #   def add(b : B)
+  #     @bs << b
+  #   end
+  # end
+  #
+  # class B
+  #   @c : C
+  #
+  #   def initialize(@c : C)
+  #   end
+  # end
+  #
+  # class C; end
+  #
+  # a = A.new
+  # a.add(B.new C.new)
+  # a.add(B.new C.new)
+  #
+  # PerfTools::MemProf.pretty_log_object_graph STDOUT, C
+  # ```
+  #
+  # produces the following graph:
+  #
+  # ```mermaid
+  # graph LR
+  #   0x109736e80["0x109736e80 C"]
+  #   0x109736e70["0x109736e70 C"]
+  #   0x10972fe40["0x10972fe40 B"] --@c,0--> 0x109736e80
+  #   0x10972fe20["0x10972fe20 (class 0)"] --@(field 0),1--> 0x10972fe40
+  #   0x10972fe60["0x10972fe60 Array(B)"] --@(field 16),2--> 0x10972fe20
+  #   0x10972fe80["0x10972fe80 A"] --@bs,3--> 0x10972fe60
+  #   0x10972fe00["0x10972fe00 B"] --@c,0--> 0x109736e70
+  #   0x10972fe20["0x10972fe20 (class 0)"] --@(field 8),1--> 0x10972fe00
+  # ```
+  #
+  # `(class 0)` is the buffer of the array. The number next to the field is the level of indirection,
+  # counting as 0 for the objects that direct links to an object of the given *type*, 1 for the objects
+  # that have a direct link to an object of the given *type*, and so on.
+  #
+  # The graph is limited to `REF_LIMIT` objects and `REF_LEVEL` levels of indirection.
+  def self.pretty_log_object_graph(io : IO, type : T.class) : Nil forall T
     GC.collect
     stopping do
       type_id = T.crystal_instance_type_id
@@ -411,17 +461,13 @@ module PerfTools::MemProf
         end
       end
 
-      if mermaid
-        io << "graph LR\n"
+      io << "graph LR\n"
 
-        original_pointers.each do |ptr|
-          if info = alloc_infos[ptr]?
-            name = known_classes[info.type_id]?.try(&.name) || "(class #{info.type_id})"
-            io << "  0x" << ptr.to_s(16) << "[\"0x" << ptr.to_s(16) << " " << name << "\"]\n"
-          end
+      original_pointers.each do |ptr|
+        if info = alloc_infos[ptr]?
+          name = known_classes[info.type_id]?.try(&.name) || "(class #{info.type_id})"
+          io << "  0x" << ptr.to_s(16) << "[\"0x" << ptr.to_s(16) << " " << name << "\"]\n"
         end
-      else
-        io << referees.size << '\n'
       end
 
       referees.each do |ref|
@@ -431,13 +477,8 @@ module PerfTools::MemProf
         else
           name = "(class 0)"
         end
-        if mermaid
-          io << "  0x" << from.to_s(16) << "[\"0x" << from.to_s(16) << " " << name << "\"] --@" << field << "," << level << "--> 0x" << to.to_s(16) << "\n"
-        else
-          io << from << '\t' << name << "\t" << to << '\n'
-        end
+        io << "  0x" << from.to_s(16) << "[\"0x" << from.to_s(16) << " " << name << "\"] --@" << field << "," << level << "--> 0x" << to.to_s(16) << "\n"
       end
-      original_pointers.size
     end
   end
 
