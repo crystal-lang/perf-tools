@@ -326,6 +326,65 @@ module PerfTools::MemProf
     end
   end
 
+  def self.log_referred_object_by_type(io : IO, type : T.class, md = false) : Nil forall T
+    GC.collect
+    stopping do
+      type_id = T.crystal_instance_type_id
+      alloc_infos = self.alloc_infos
+      references = alloc_infos.select do |_, info|
+        info.type_id == type_id
+      end
+      pointers = references.keys
+
+      referees = Array({UInt64, UInt64}).new
+
+      visited = [] of {UInt64, UInt64}
+
+      alloc_infos.each do |ptr, info|
+        next if info.type_id == 0 # skip allocations with no type info
+
+        next if info.atomic
+
+        next if visited.any? { |addr, _| addr == ptr }
+
+        stack = [{ptr, info.size}]
+
+        until stack.empty?
+          subptr, size = stack.pop
+          visited << {subptr, size}
+
+          each_inner_pointer(Pointer(Void*).new(subptr), size) do |subptr|
+            next unless subinfo = alloc_infos[subptr.address]?
+            if pointers.includes? subptr.address
+              # we found a link, add the chain
+              pointers << ptr
+              referees << {ptr, subptr.address}
+            elsif !subinfo.atomic && !visited.any? { |addr, size| addr == subptr.address }
+              stack << {subptr.address, subinfo.size}
+            end
+          end
+        end
+      end
+
+      if md
+        io << "graph LR\n"
+      else
+        io << referees.size << '\n'
+      end
+
+      referees.each do |ref|
+        info = alloc_infos[ref[0]]
+        name = known_classes[info.type_id]? || "(class #{info.type_id})"
+
+        if md
+          io << "  " << ref[0] << "(" << ref[0] << " " << name << ") --> " << ref[1] << "\n"
+        else
+          io << ref[0] << '\t' << name << "\t" << ref[1] << '\n'
+        end
+      end
+    end
+  end
+
   # Returns the total number of heap bytes occupied by *object*.
   #
   # This is the same per-object "size" defined in `.log_object_sizes`.
