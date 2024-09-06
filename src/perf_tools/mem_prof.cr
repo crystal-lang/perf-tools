@@ -399,12 +399,16 @@ module PerfTools::MemProf
     stopping do
       type_id = T.crystal_instance_type_id
       alloc_infos = self.alloc_infos
-      pointers = alloc_infos
-        .select { |_, info| info.type_id == type_id }
-        .map { |ptr, _| {ptr, 0} }
 
-      pointers = REF_LIMIT == 0 ? pointers.to_h : pointers.first(REF_LIMIT).to_h
-      original_pointers = pointers.dup.map { |ptr, _| ptr }
+      pointers = Hash(UInt64, Int32).new(REF_LIMIT == 0 ? 10 : REF_LIMIT)
+
+      alloc_infos.each do |ptr, info|
+        next unless info.type_id == type_id
+        pointers[ptr] = 0
+        break if REF_LIMIT > 0 && pointers.size >= REF_LIMIT
+      end
+
+      original_pointers = pointers.keys
 
       referees = Array({UInt64, UInt64, String, Int32}).new
 
