@@ -97,6 +97,20 @@ module PerfTools::MemProf
     # Configurable at run time using the `MEMPROF_PRINT_AT_EXIT` environment
     # variable.
     PRINT_AT_EXIT = ENV["MEMPROF_PRINT_AT_EXIT"]? == "1"
+
+    # The maximum number of objects to track in `MemProf.pretty_log_object_graph`.
+    # 0 is "unlimited". Defaults to 10.
+    #
+    # Configurable at run time using the `MEMPROF_REF_LIMIT` environment
+    # variable.
+    REF_LIMIT = (ENV["MEMPROF_REF_LIMIT"]? || "10").to_i
+
+    # The maximum number of indirections to track `MemProf.pretty_log_object_graph`.
+    # 0 is "unlimited". Defaults to 5.
+    #
+    # Configurable at run time using the `MEMPROF_REF_LEVEL` environment
+    # variable.
+    REF_LEVEL = (ENV["MEMPROF_REF_LEVEL"]? || "5").to_i
   {% end %}
 
   {% begin %}
@@ -117,18 +131,21 @@ module PerfTools::MemProf
     {} of Int32 => UInt64
   end
 
+  record KnownClass, name : String, fields_offsets : Hash(Int32, String)?
   # :nodoc:
-  class_getter known_classes : Hash(Int32, String) do
-    {} of Int32 => String
+  class_getter known_classes : Hash(Int32, KnownClass) do
+    {} of Int32 => KnownClass
   end
 
   @@last_type_id = 0
   @@last_type_name : String?
+  @@last_type_fields : Hash(Int32, String)? = nil
 
   # :nodoc:
-  def self.set_type(type : T.class, &) forall T
+  def self.set_type(type : T.class, ivars : Hash(Int32, String)?, &) forall T
     @@last_type_id = T.crystal_instance_type_id
     @@last_type_name = T.name
+    @@last_type_fields = ivars
     yield
   end
 
@@ -137,6 +154,7 @@ module PerfTools::MemProf
     if running?
       stopping do
         type_id, @@last_type_id = @@last_type_id, 0
+
         stack = StaticArray(Void*, STACK_TOTAL).new(Pointer(Void).null)
         Exception::CallStack.unwind_to(stack.to_slice)
         key = StaticArray(UInt64, STACK_DEPTH).new { |i| stack.unsafe_fetch(STACK_SKIP &+ i).address }
@@ -144,7 +162,7 @@ module PerfTools::MemProf
         unless type_id == 0
           obj_counts = self.obj_counts
           obj_counts[type_id] = obj_counts.fetch(type_id, 0_u64) &+ 1
-          known_classes[type_id] = @@last_type_name.not_nil!
+          known_classes[type_id] = KnownClass.new @@last_type_name.not_nil!, @@last_type_fields
         end
       end
     end
@@ -217,10 +235,10 @@ module PerfTools::MemProf
       end
 
       io << lines << '\n'
-      known_classes.each do |type_id, name|
+      known_classes.each do |type_id, klass|
         count = obj_counts.fetch(type_id, 0_u64)
         next unless count > 0
-        io << count << '\t' << name << '\n'
+        io << count << '\t' << klass.name << '\n'
       end
     end
   end
@@ -316,12 +334,154 @@ module PerfTools::MemProf
       io << counts.size << '\n'
       counts.each do |type_id, bytes|
         io << bytes << '\t'
-        if name = known_classes[type_id]?
-          io << name
+        if klass = known_classes[type_id]?
+          io << klass.name
         else
           io << "(class " << type_id << ")"
         end
         io << '\n'
+      end
+    end
+  end
+
+  # Logs the objects that are transitively reachable to a given *type* of objects,
+  # outputing a mermaid graph to the given *io*. The graph contains an indication of
+  # the field that links an object, or its index if the field is not known.
+  #
+  # Example:
+  #
+  # ```
+  # class A
+  #   @bs = Array(B).new
+  #
+  #   def add(b : B)
+  #     @bs << b
+  #   end
+  # end
+  #
+  # class B
+  #   @c : C
+  #
+  #   def initialize(@c : C)
+  #   end
+  # end
+  #
+  # class C; end
+  #
+  # a = A.new
+  # a.add(B.new C.new)
+  # a.add(B.new C.new)
+  #
+  # PerfTools::MemProf.pretty_log_object_graph STDOUT, C
+  # ```
+  #
+  # produces the following graph:
+  #
+  # ```mermaid
+  # graph LR
+  #   0x109736e80["0x109736e80 C"]
+  #   0x109736e70["0x109736e70 C"]
+  #   0x10972fe40["0x10972fe40 B"] --@c,0--> 0x109736e80
+  #   0x10972fe20["0x10972fe20 (class 0)"] --@(field 0),1--> 0x10972fe40
+  #   0x10972fe60["0x10972fe60 Array(B)"] --@(field 16),2--> 0x10972fe20
+  #   0x10972fe80["0x10972fe80 A"] --@bs,3--> 0x10972fe60
+  #   0x10972fe00["0x10972fe00 B"] --@c,0--> 0x109736e70
+  #   0x10972fe20["0x10972fe20 (class 0)"] --@(field 8),1--> 0x10972fe00
+  # ```
+  #
+  # `(class 0)` is the buffer of the array. The number next to the field is the level of indirection,
+  # counting as 0 for the objects that direct links to an object of the given *type*, 1 for the objects
+  # that have a direct link to an object of the given *type*, and so on.
+  #
+  # The graph is limited to `REF_LIMIT` objects and `REF_LEVEL` levels of indirection.
+  def self.pretty_log_object_graph(io : IO, type : T.class) : Nil forall T
+    GC.collect
+    stopping do
+      type_id = T.crystal_instance_type_id
+      alloc_infos = self.alloc_infos
+
+      pointers = Hash(UInt64, Int32).new(REF_LIMIT == 0 ? 10 : REF_LIMIT)
+
+      alloc_infos.each do |ptr, info|
+        next unless info.type_id == type_id
+        pointers[ptr] = 0
+        break if REF_LIMIT > 0 && pointers.size >= REF_LIMIT
+      end
+
+      original_pointers = pointers.keys
+
+      referees = Array({UInt64, UInt64, String, Int32}).new
+
+      visited = [] of UInt64
+
+      alloc_infos.each do |ptr, info|
+        next if info.atomic
+
+        next if visited.includes? ptr
+
+        init = info.type_id == 0 ? -sizeof(Void*) : 0
+
+        stack = [{ptr, init, info.size}]
+        until stack.empty?
+          ptr, offset, size = stack.pop
+          offset += sizeof(Void*) # we know that at 0 there is the type_id, no need to check it
+
+          next if offset >= size
+
+          stack << {ptr, offset, size}
+          value_ptr = Pointer(Void*).new(ptr + offset)
+          subptr = value_ptr.value.address
+
+          if (level = pointers[subptr]?) && (REF_LEVEL == 0 || level < REF_LEVEL)
+            stack << {subptr, 0, 0_u64}
+
+            stack.reverse.each_cons_pair do |to, from|
+              from_ptr, from_offset, _ = from
+              to_ptr, _, _ = to
+              if info = alloc_infos[from_ptr]?
+                field = known_classes[info.type_id]?.try(&.fields_offsets.try { |fo| fo[from_offset]? }) || "(field #{from_offset})"
+              else
+                field = "(field #{from_offset})"
+              end
+
+              tuple = {from_ptr, to_ptr, field, level}
+              unless referees.includes? tuple
+                pointers[from_ptr] = level + 1
+                pointers[to_ptr] = level
+                referees << tuple
+              end
+              level += 1
+              break if REF_LEVEL > 0 && level >= REF_LEVEL
+            end
+            stack.pop
+          elsif level
+            # do nothing
+          elsif (subinfo = alloc_infos[subptr]?) && !subinfo.atomic && !visited.includes? subptr
+            init = subinfo.type_id == 0 ? -sizeof(Void*) : 0
+            stack << {subptr, init, subinfo.size}
+          end
+
+          visited << subptr
+        end
+      end
+
+      io << "graph LR\n"
+
+      original_pointers.each do |ptr|
+        if info = alloc_infos[ptr]?
+          name = known_classes[info.type_id]?.try(&.name) || "(class #{info.type_id})"
+          io << "  0x" << ptr.to_s(16) << "[\"0x" << ptr.to_s(16) << " " << name << "\"]\n"
+        end
+      end
+
+      referees.each do |ref|
+        from, to, field, level = ref
+        if info = alloc_infos[from]?
+          name = known_classes[info.type_id]?.try(&.name) || "(class #{info.type_id})"
+        else
+          name = "(class 0)"
+        end
+        io << "  0x" << from.to_s(16) << "[\"0x" << from.to_s(16) << " " << name << "\"] --@" << field << "," << level << "--> 0x" << to.to_s(16) << "\n"
       end
     end
   end
@@ -521,6 +681,7 @@ module GC
   end
 end
 
+# This is for the system allocated classes, which doesn't trigger the `inherited` macro
 {% begin %}
   {% types = Reference.all_subclasses %}
   {% for type in types %}
@@ -528,7 +689,7 @@ end
       class {{ type }}
         # :nodoc:
         def self.allocate
-          PerfTools::MemProf.set_type(self) { previous_def }
+          PerfTools::MemProf.set_type(self, nil) { previous_def }
         end
       end
     {% end %}
@@ -539,7 +700,21 @@ class Reference
   macro inherited
     # :nodoc:
     def self.allocate
-      PerfTools::MemProf.set_type(self) { previous_def }
+      PerfTools::MemProf.set_type(self, self._fields_offsets) { previous_def }
     end
+  end
+end
+
+class Object
+  def self._fields_offsets
+    {% begin %}
+    {
+      {% unless @type.private? %}
+        {% for field in @type.instance_vars %}
+          offsetof({{@type}}, @{{ field.name }}) => "{{ field.name.id }}",
+        {% end %}
+      {% end %}
+    } of Int32 => String
+    {% end %}
   end
 end
