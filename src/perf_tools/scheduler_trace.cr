@@ -1,20 +1,36 @@
 require "./common"
 
+class Fiber
+  def status : String
+    if @alive
+      if @context.@resumable == 1
+        "suspended"
+      else
+        "running"
+      end
+    else
+      "dead"
+    end
+  end
+end
+
 module PerfTools::SchedulerTrace
   {% if flag?(:unix) %}
+    class_property details_on_signal = true
+
     # Installs a signal handler to call `.print_runtime_status` on demand.
     #
     # Uses `SIGUSR1` by default but you may configure another signal, for
     # example `LibC::SIGRTMIN + 7`. You may also register multiple signals, one
     # with fiber detail and the another without for example.
-    def self.on(signal : Int32 = Signal::USR1.value, details = false) : Nil
+    def self.on(signal : Int32 = Signal::USR1.value) : Nil
       # not using Signal#trap so the signal will be handled directly instead
       # of through the event loop that may have to wait (or be blocked in
       # the worst case):
       action = LibC::Sigaction.new
       action.sa_flags = LibC::SA_RESTART
       action.sa_sigaction = LibC::SigactionHandlerT.new do |_, _, _|
-        print_runtime_status(details)
+        print_runtime_status(SchedulerTrace.details_on_signal)
       end
       LibC.sigemptyset(pointerof(action.@sa_mask))
       LibC.sigaction(signal, pointerof(action), nil)
@@ -41,14 +57,14 @@ module PerfTools::SchedulerTrace
 
     Crystal::System.print_error("sched.details time=%u\n", Crystal::System::Time.ticks)
 
-    ExecutionContext.unsafe_each do |execution_context|
+    Fiber::ExecutionContext.unsafe_each do |execution_context|
       print_runtime_status(execution_context, details)
     end
 
     Thread.start_world
   end
 
-  private def self.print_runtime_status(execution_context : ExecutionContext::MultiThreaded, details = false) : Nil
+  private def self.print_runtime_status(execution_context : Fiber::ExecutionContext::MultiThreaded, details = false) : Nil
     Crystal::System.print_error("%s name=%s global_queue.size=%d\n",
       execution_context.class.name,
       execution_context.name,
@@ -67,7 +83,7 @@ module PerfTools::SchedulerTrace
     end
   end
 
-  private def self.print_runtime_status(execution_context : ExecutionContext::SingleThreaded, details = false) : Nil
+  private def self.print_runtime_status(execution_context : Fiber::ExecutionContext::SingleThreaded, details = false) : Nil
     Crystal::System.print_error("%s name=%s global_queue.size=%d\n",
       execution_context.class.name,
       execution_context.name,
@@ -84,7 +100,7 @@ module PerfTools::SchedulerTrace
     end
   end
 
-  private def self.print_runtime_status(execution_context : ExecutionContext::Isolated, details = false) : Nil
+  private def self.print_runtime_status(execution_context : Fiber::ExecutionContext::Isolated, details = false) : Nil
     Crystal::System.print_error("%s name=%s\n", execution_context.class.name, execution_context.name)
     print_runtime_status(execution_context.@thread, details = false)
   end
@@ -97,20 +113,20 @@ module PerfTools::SchedulerTrace
         thread.@system_handle
       {% end %}
 
-    case scheduler = thread.current_scheduler?
-    when ExecutionContext::MultiThreaded::Scheduler
+    case scheduler = thread.scheduler?
+    when Fiber::ExecutionContext::MultiThreaded::Scheduler
       Crystal::System.print_error("  Scheduler name=%s thread=%p local_queue.size=%u status=%s\n",
         scheduler.name,
         thread_handle,
         scheduler.@runnables.size,
         scheduler.status)
-    when ExecutionContext::SingleThreaded
+    when Fiber::ExecutionContext::SingleThreaded
       Crystal::System.print_error("  Scheduler name=%s thread=%p local_queue.size=%u status=%s\n",
         scheduler.name,
         thread_handle,
         scheduler.@runnables.size,
         scheduler.status)
-    when ExecutionContext::Isolated
+    when Fiber::ExecutionContext::Isolated
       Crystal::System.print_error("  Scheduler name=%s thread=%p status=%s\n",
         scheduler.name,
         thread_handle,
@@ -124,9 +140,8 @@ module PerfTools::SchedulerTrace
     end
   end
 
-  # TODO: print the fiber status: running, queued (local, global), sleeping, suspended, ...
   private def self.print_runtime_status(fiber : Fiber) : Nil
-    Crystal::System.print_error("  Fiber %p name=%s\n", fiber.as(Void*), fiber.name)
+    Crystal::System.print_error("  Fiber %p name=%s status=%s\n", fiber.as(Void*), fiber.name, fiber.status.to_s)
   end
 
   # private def self.print_runtime_status(arg : Nil, details = false) : Nil
