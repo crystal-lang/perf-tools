@@ -104,7 +104,7 @@ struct Exception::CallStack
       context = Pointer(LibC::CONTEXT).malloc(1)
       context.value.contextFlags = LibC::CONTEXT_FULL
       LibC.RtlCaptureContext(context)
-        
+
       # unlike DWARF, this is required on Windows to even be able to produce
       # correct stack traces, so we do it here but not in `libunwind.cr`
       load_debug_info
@@ -180,4 +180,17 @@ struct Exception::CallStack
       LibUnwind.backtrace(backtrace_fn, pointerof(callstack).as(Void*))
     end
   {% end %}
+
+  def self.__perftools_print_frame(ip : Void*) : Nil
+    repeated_frame = RepeatedFrame.new(ip)
+
+    {% if flag?(:win32) && !flag?(:gnu) %}
+      # TODO: can't merely call #print_frame because the UTF-16 to UTF-8
+      # conversion is allocating strings, and it's probably a bad idea to
+      # allocate while the world is stopped.
+      Crystal::System.print_error "[%p] ???", repeated_frame.ip
+    {% else %}
+      print_frame(repeated_frame)
+    {% end %}
+  end
 end
