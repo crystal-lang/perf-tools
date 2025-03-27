@@ -194,13 +194,13 @@ class Fiber
   {% begin %}
   def initialize(
     name : String?,
-    {% if compare_versions(Crystal::VERSION, "1.16.0-dev") >= 0 %}stack : Stack,{% end %}
+    {% if Fiber.has_constant?(:Stack) %}stack : Stack,{% end %}
     {% if flag?(:execution_context) %}execution_context : ExecutionContext = ExecutionContext.current,{% end %}
     &proc : ->
   )
     previous_def(
       name,
-      {% if compare_versions(Crystal::VERSION, "1.16.0-dev") >= 0 %}stack,{% end %}
+      {% if Fiber.has_constant?(:Stack) %}stack,{% end %}
       {% if flag?(:execution_context) %}execution_context,{% end %}
       &proc
     )
@@ -217,7 +217,7 @@ class Fiber
   end
 
   # crystal-lang/crystal#13701
-  {% if compare_versions(Crystal::VERSION, "1.10.0") < 0 %}
+  {% if compare_versions(Crystal::VERSION, "1.10.0") < 0 && !Fiber.has_constant?(:Stack) && !flag?(:execution_context) %}
     def run
       GC.unlock_read
       @proc.call
