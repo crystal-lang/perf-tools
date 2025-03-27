@@ -252,15 +252,24 @@ class Fiber
   {% end %}
 end
 
-class Crystal::Scheduler
-  protected def resume(fiber : Fiber) : Nil
-    current_fiber = {% if Crystal::Scheduler.instance_vars.any? { |x| x.name == :thread.id } %}
-                      # crystal >= 1.13
-                      @thread.current_fiber
-                    {% else %}
-                      @current
-                    {% end %}
-    PerfTools::FiberTrace.track_fiber(:yield, current_fiber)
-    previous_def
+{% if flag?(:execution_context) %}
+  module Fiber::ExecutionContext::Scheduler
+    def swapcontext(fiber : Fiber)
+      PerfTools::FiberTrace.track_fiber(:yield, fiber)
+      previous_def(fiber)
+    end
   end
-end
+{% else %}
+  class Crystal::Scheduler
+    protected def resume(fiber : Fiber) : Nil
+      current_fiber = \{% if Crystal::Scheduler.instance_vars.any? { |x| x.name == :thread.id } %}
+                        # crystal >= 1.13
+                        @thread.current_fiber
+                      \{% else %}
+                        @current
+                      \{% end %}
+      PerfTools::FiberTrace.track_fiber(:yield, current_fiber)
+      previous_def
+    end
+  end
+{% end %}
