@@ -255,7 +255,7 @@ end
 {% if flag?(:execution_context) %}
   module Fiber::ExecutionContext::Scheduler
     def swapcontext(fiber : Fiber)
-      PerfTools::FiberTrace.track_fiber(:yield, fiber)
+      PerfTools::FiberTrace.track_fiber(:yield, Fiber.current)
       previous_def(fiber)
     end
   end
