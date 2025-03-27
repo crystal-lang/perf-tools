@@ -94,9 +94,6 @@ module PerfTools
 end
 
 struct Exception::CallStack
-  def initialize(*, __callstack @callstack : Array(Void*))
-  end
-
   {% if flag?(:win32) %}
     {% if flag?(:interpreted) %} @[Primitive(:interpreter_call_stack_unwind)] {% end %}
     def self.unwind_to(buf : Slice(Void*)) : Nil
@@ -104,7 +101,7 @@ struct Exception::CallStack
       context = Pointer(LibC::CONTEXT).malloc(1)
       context.value.contextFlags = LibC::CONTEXT_FULL
       LibC.RtlCaptureContext(context)
-        
+
       # unlike DWARF, this is required on Windows to even be able to produce
       # correct stack traces, so we do it here but not in `libunwind.cr`
       load_debug_info
@@ -180,4 +177,83 @@ struct Exception::CallStack
       LibUnwind.backtrace(backtrace_fn, pointerof(callstack).as(Void*))
     end
   {% end %}
+
+  def self.__perftools_decode_backtrace(stack : Slice(Void*)) : Array(String)
+    frames = [] of String
+    stack.each do |ip|
+      if frame = __perftools_decode_backtrace_frame(ip, ENV["CRYSTAL_CALLSTACK_FULL_INFO"]? == "1")
+        frames << frame
+      end
+    end
+    frames
+  end
+
+  # TODO: reduce duplication with #decode_backtrace in stdlib
+  def self.__perftools_decode_backtrace_frame(ip, show_full_info) : String?
+    pc = CallStack.decode_address(ip)
+    file, line_number, column_number = CallStack.decode_line_number(pc)
+
+    if file && file != "??"
+      return if @@skip.includes?(file)
+
+      # Turn to relative to the current dir, if possible
+      if current_dir = CURRENT_DIR
+        if rel = Path[file].relative_to?(current_dir)
+          rel = rel.to_s
+          file = rel unless rel.starts_with?("..")
+        end
+      end
+
+      file_line_column = file
+      unless line_number == 0
+        file_line_column = "#{file_line_column}:#{line_number}"
+        file_line_column = "#{file_line_column}:#{column_number}" unless column_number == 0
+      end
+    end
+
+    if name = CallStack.decode_function_name(pc)
+      function = name
+    elsif frame = CallStack.decode_frame(ip)
+      _, function, file = frame
+      # Crystal methods (their mangled name) start with `*`, so
+      # we remove that to have less clutter in the output.
+      function = function.lchop('*')
+    else
+      function = "??"
+    end
+
+    if file_line_column
+      if show_full_info && (frame = CallStack.decode_frame(ip))
+        _, sname, _ = frame
+        line = "#{file_line_column} in '#{sname}'"
+      else
+        line = "#{file_line_column} in '#{function}'"
+      end
+    else
+      if file == "??" && function == "??"
+        line = "???"
+      else
+        line = "#{file} in '#{function}'"
+      end
+    end
+
+    if show_full_info
+      line = "#{line} at 0x#{ip.address.to_s(16)}"
+    end
+
+    line
+  end
+
+  def self.__perftools_print_frame(ip : Void*) : Nil
+    repeated_frame = RepeatedFrame.new(ip)
+
+    {% if flag?(:win32) && !flag?(:gnu) %}
+      # TODO: can't merely call #print_frame because the UTF-16 to UTF-8
+      # conversion is allocating strings, and it's probably a bad idea to
+      # allocate while the world is stopped.
+      Crystal::System.print_error "[%p] ???", repeated_frame.ip
+    {% else %}
+      print_frame(repeated_frame)
+    {% end %}
+  end
 end
