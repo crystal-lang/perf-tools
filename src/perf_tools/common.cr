@@ -1,3 +1,5 @@
+require "../core_ext/exception_call_stack"
+
 module PerfTools
   protected def self.md_code_span(io : IO, str : String) : Nil
     ticks = 0
@@ -5,6 +7,16 @@ module PerfTools
     ticks.times { io << '`' }
     io << "` " << str << " `"
     ticks.times { io << '`' }
+  end
+
+  protected def self.decode_backtrace(stack : Slice(Void*)) : Array(String)
+    show_full_info = ENV["CRYSTAL_CALLSTACK_FULL_INFO"]? == "1"
+    frames = [] of String
+    stack.each do |ip|
+      frame = Exception::CallStack.decode_backtrace_frame(ip, show_full_info)
+      frames << frame if frame
+    end
+    frames
   end
 
   # :nodoc:
@@ -91,11 +103,6 @@ module PerfTools
       end
     end
   end
-end
-
-struct Exception::CallStack
-  def initialize(*, __callstack @callstack : Array(Void*))
-  end
 
   {% if flag?(:win32) %}
     {% if flag?(:interpreted) %} @[Primitive(:interpreter_call_stack_unwind)] {% end %}
@@ -107,7 +114,7 @@ struct Exception::CallStack
 
       # unlike DWARF, this is required on Windows to even be able to produce
       # correct stack traces, so we do it here but not in `libunwind.cr`
-      load_debug_info
+      Exception::CallStack.load_debug_info
 
       machine_type = {% if flag?(:x86_64) %}
                       LibC::IMAGE_FILE_MACHINE_AMD64
@@ -159,10 +166,10 @@ struct Exception::CallStack
         data.as({Void**, Void**}*).value = {b + 1, e}
 
         ip = {% if flag?(:arm) %}
-              Pointer(Void).new(__crystal_unwind_get_ip(context))
-            {% else %}
-              Pointer(Void).new(LibUnwind.get_ip(context))
-            {% end %}
+               Pointer(Void).new(__crystal_unwind_get_ip(context))
+             {% else %}
+               Pointer(Void).new(LibUnwind.get_ip(context))
+             {% end %}
         b.value = ip
 
         {% if flag?(:gnu) && flag?(:i386) %}
@@ -178,75 +185,6 @@ struct Exception::CallStack
       end
 
       LibUnwind.backtrace(backtrace_fn, pointerof(callstack).as(Void*))
-    end
-  {% end %}
-
-  # :nodoc:
-  def self.__decode_backtrace(stack : Slice(Void*)) : Array(String)
-    show_full_info = ENV["CRYSTAL_CALLSTACK_FULL_INFO"]? == "1"
-    frames = [] of String
-    stack.each do |ip|
-      frame = decode_backtrace_frame(ip, show_full_info)
-      frames << frame if frame
-    end
-    frames
-  end
-
-  {% unless @type.class.has_method?(:decode_backtrace_frame) %} # Crystal < 1.16.0
-    # :nodoc:
-    def self.decode_backtrace_frame(ip, show_full_info) : String?
-      pc = decode_address(ip)
-      file, line_number, column_number = decode_line_number(pc)
-
-      if file && file != "??"
-        return if @@skip.includes?(file)
-
-        # Turn to relative to the current dir, if possible
-        if current_dir = CURRENT_DIR
-          if rel = Path[file].relative_to?(current_dir)
-            rel = rel.to_s
-            file = rel unless rel.starts_with?("..")
-          end
-        end
-
-        file_line_column = file
-        unless line_number == 0
-          file_line_column = "#{file_line_column}:#{line_number}"
-          file_line_column = "#{file_line_column}:#{column_number}" unless column_number == 0
-        end
-      end
-
-      if name = decode_function_name(pc)
-        function = name
-      elsif frame = decode_frame(ip)
-        _, function, file = frame
-        # Crystal methods (their mangled name) start with `*`, so
-        # we remove that to have less clutter in the output.
-        function = function.lchop('*')
-      else
-        function = "??"
-      end
-
-      if file_line_column
-        if show_full_info && (frame = decode_frame(ip))
-          _, sname, _ = frame
-          line = "#{file_line_column} in '#{sname}'"
-        else
-          line = "#{file_line_column} in '#{function}'"
-        end
-      else
-        if file == "??" && function == "??"
-          line = "???"
-        else
-          line = "#{file} in '#{function}'"
-        end
-      end
-
-      if show_full_info
-        line = "#{line} at 0x#{ip.address.to_s(16)}"
-      end
-
-      line
     end
   {% end %}
 end
