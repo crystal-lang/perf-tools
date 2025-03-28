@@ -191,10 +191,22 @@ module PerfTools::FiberTrace
 end
 
 class Fiber
-  def initialize(@name : String? = nil, &@proc : ->)
-    previous_def(name, &proc)
+  {% begin %}
+  def initialize(
+    name : String?,
+    {% if Fiber.has_constant?(:Stack) %}stack : Stack,{% end %}
+    {% if flag?(:execution_context) %}execution_context : ExecutionContext = ExecutionContext.current,{% end %}
+    &proc : ->
+  )
+    previous_def(
+      name,
+      {% if Fiber.has_constant?(:Stack) %}stack,{% end %}
+      {% if flag?(:execution_context) %}execution_context,{% end %}
+      &proc
+    )
     PerfTools::FiberTrace.track_fiber(:spawn, self)
   end
+  {% end %}
 
   def self.inactive(fiber : Fiber)
     PerfTools::FiberTrace.lock.synchronize do
@@ -205,7 +217,7 @@ class Fiber
   end
 
   # crystal-lang/crystal#13701
-  {% if compare_versions(Crystal::VERSION, "1.10.0") < 0 %}
+  {% unless Fiber.class.has_method?(:inactive) %} # Crystal < 1.10.0
     def run
       GC.unlock_read
       @proc.call
