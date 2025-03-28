@@ -217,7 +217,7 @@ class Fiber
   end
 
   # crystal-lang/crystal#13701
-  {% if compare_versions(Crystal::VERSION, "1.10.0") < 0 && !Fiber.has_constant?(:Stack) && !flag?(:execution_context) %}
+  {% unless Fiber.class.has_method?(:inactive) %} # Crystal < 1.10.0
     def run
       GC.unlock_read
       @proc.call
