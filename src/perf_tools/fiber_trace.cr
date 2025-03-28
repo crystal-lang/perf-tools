@@ -96,11 +96,11 @@ module PerfTools::FiberTrace
     fibers.each do |fiber|
       io << fiber.name << '\n'
 
-      s = Exception::CallStack.__decode_backtrace(fiber.__spawn_stack)
+      s = PerfTools.decode_backtrace(fiber.__spawn_stack)
       io << s.size << '\n'
       s.each { |frame| io << frame << '\n' }
 
-      y = Exception::CallStack.__decode_backtrace(fiber.__yield_stack)
+      y = PerfTools.decode_backtrace(fiber.__yield_stack)
       io << y.size << '\n'
       y.each { |frame| io << frame << '\n' }
     end
@@ -148,12 +148,12 @@ module PerfTools::FiberTrace
       io << " | "
       names.compact.join(io, ' ') { |name| PerfTools.md_code_span(io, name) }
       io << " | "
-      Exception::CallStack.__decode_backtrace(s).join(io, "<br>") do |frame|
+      PerfTools.decode_backtrace(s).join(io, "<br>") do |frame|
         PerfTools.md_code_span(io, frame)
       end
       io << " | "
       if y.size > 0
-        Exception::CallStack.__decode_backtrace(y).join(io, "<br>") do |frame|
+        PerfTools.decode_backtrace(y).join(io, "<br>") do |frame|
           PerfTools.md_code_span(io, frame)
         end
       else
@@ -169,7 +169,7 @@ module PerfTools::FiberTrace
 
     stack = Array(Void*).new(size, Pointer(Void).null)
     slice = Slice(Void*).new(stack.to_unsafe, size)
-    Exception::CallStack.unwind_to(slice)
+    PerfTools.unwind_to(slice)
 
     while stack.last?.try(&.null?)
       stack.pop
