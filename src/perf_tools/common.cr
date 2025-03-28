@@ -101,7 +101,7 @@ struct Exception::CallStack
       context = Pointer(LibC::CONTEXT).malloc(1)
       context.value.contextFlags = LibC::CONTEXT_FULL
       LibC.RtlCaptureContext(context)
-        
+
       # unlike DWARF, this is required on Windows to even be able to produce
       # correct stack traces, so we do it here but not in `libunwind.cr`
       load_debug_info
@@ -178,7 +178,8 @@ struct Exception::CallStack
     end
   {% end %}
 
-  def self.__perftools_decode_backtrace(stack : Slice(Void*)) : Array(String)
+  # :nodoc:
+  def self.__decode_backtrace(stack : Slice(Void*)) : Array(String)
     show_full_info = ENV["CRYSTAL_CALLSTACK_FULL_INFO"]? == "1"
     frames = [] of String
     stack.each do |ip|
@@ -189,6 +190,7 @@ struct Exception::CallStack
   end
 
   {% unless @type.class.has_method?(:decode_backtrace_frame) %} # Crystal < 1.16.0
+    # :nodoc:
     def self.decode_backtrace_frame(ip, show_full_info) : String?
       pc = decode_address(ip)
       file, line_number, column_number = decode_line_number(pc)
@@ -245,7 +247,8 @@ struct Exception::CallStack
     end
   {% end %}
 
-  def self.__perftools_print_frame(ip : Void*) : Nil
+  # :nodoc:
+  def self.__print_frame(ip : Void*) : Nil
     repeated_frame = RepeatedFrame.new(ip)
 
     {% if flag?(:win32) && !flag?(:gnu) %}
