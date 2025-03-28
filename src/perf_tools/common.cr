@@ -246,18 +246,4 @@ struct Exception::CallStack
       line
     end
   {% end %}
-
-  # :nodoc:
-  def self.__print_frame(ip : Void*) : Nil
-    repeated_frame = RepeatedFrame.new(ip)
-
-    {% if flag?(:win32) && !flag?(:gnu) %}
-      # TODO: can't merely call #print_frame because the UTF-16 to UTF-8
-      # conversion is allocating strings, and it's probably a bad idea to
-      # allocate while the world is stopped.
-      Crystal::System.print_error "[%p] ???", repeated_frame.ip
-    {% else %}
-      print_frame(repeated_frame)
-    {% end %}
-  end
 end
