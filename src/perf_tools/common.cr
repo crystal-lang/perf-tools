@@ -94,6 +94,9 @@ module PerfTools
 end
 
 struct Exception::CallStack
+  def initialize(*, __callstack @callstack : Array(Void*))
+  end
+
   {% if flag?(:win32) %}
     {% if flag?(:interpreted) %} @[Primitive(:interpreter_call_stack_unwind)] {% end %}
     def self.unwind_to(buf : Slice(Void*)) : Nil
