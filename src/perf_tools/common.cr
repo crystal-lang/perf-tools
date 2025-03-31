@@ -1,3 +1,5 @@
+require "../core_ext/exception_call_stack"
+
 module PerfTools
   protected def self.md_code_span(io : IO, str : String) : Nil
     ticks = 0
@@ -5,6 +7,16 @@ module PerfTools
     ticks.times { io << '`' }
     io << "` " << str << " `"
     ticks.times { io << '`' }
+  end
+
+  protected def self.decode_backtrace(stack : Slice(Void*)) : Array(String)
+    show_full_info = ENV["CRYSTAL_CALLSTACK_FULL_INFO"]? == "1"
+    frames = [] of String
+    stack.each do |ip|
+      frame = Exception::CallStack.decode_backtrace_frame(ip, show_full_info)
+      frames << frame if frame
+    end
+    frames
   end
 
   # :nodoc:
@@ -91,11 +103,6 @@ module PerfTools
       end
     end
   end
-end
-
-struct Exception::CallStack
-  def initialize(*, __callstack @callstack : Array(Void*))
-  end
 
   {% if flag?(:win32) %}
     {% if flag?(:interpreted) %} @[Primitive(:interpreter_call_stack_unwind)] {% end %}
@@ -104,10 +111,10 @@ struct Exception::CallStack
       context = Pointer(LibC::CONTEXT).malloc(1)
       context.value.contextFlags = LibC::CONTEXT_FULL
       LibC.RtlCaptureContext(context)
-        
+
       # unlike DWARF, this is required on Windows to even be able to produce
       # correct stack traces, so we do it here but not in `libunwind.cr`
-      load_debug_info
+      Exception::CallStack.load_debug_info
 
       machine_type = {% if flag?(:x86_64) %}
                       LibC::IMAGE_FILE_MACHINE_AMD64
@@ -159,10 +166,10 @@ struct Exception::CallStack
         data.as({Void**, Void**}*).value = {b + 1, e}
 
         ip = {% if flag?(:arm) %}
-              Pointer(Void).new(__crystal_unwind_get_ip(context))
-            {% else %}
-              Pointer(Void).new(LibUnwind.get_ip(context))
-            {% end %}
+               Pointer(Void).new(__crystal_unwind_get_ip(context))
+             {% else %}
+               Pointer(Void).new(LibUnwind.get_ip(context))
+             {% end %}
         b.value = ip
 
         {% if flag?(:gnu) && flag?(:i386) %}
