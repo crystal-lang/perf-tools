@@ -1,55 +1,51 @@
 require "./common"
-
-class Fiber
-  def status : String
-    if @alive
-      if @context.@resumable == 1
-        "suspended"
-      else
-        "running"
-      end
-    else
-      "dead"
-    end
-  end
-end
+require "../core_ext/fiber"
 
 module PerfTools::SchedulerTrace
   {% if flag?(:unix) %}
-    class_property details_on_signal = true
-
     # Installs a signal handler to call `.print_runtime_status` on demand.
     #
-    # Uses `SIGUSR1` by default but you may configure another signal, for
-    # example `LibC::SIGRTMIN + 7`. You may also register multiple signals, one
-    # with fiber detail and the another without for example.
-    def self.on(signal : Int32 = Signal::USR1.value) : Nil
+    # You can use `Signal::USR1` or another `Signal`. You must be careful not to
+    # reuse the signals used by the GC to stop or resume the world (see
+    # `GC.sig_suspend` and `GC.sig_resume`) that uses different signals
+    # depending on the target and configuration.
+    #
+    # Set *details* to false to skip individual fiber details.
+    def self.on(signal : Signal, details : Bool = true) : Nil
       # not using Signal#trap so the signal will be handled directly instead
       # of through the event loop that may have to wait (or be blocked in
       # the worst case):
       action = LibC::Sigaction.new
       action.sa_flags = LibC::SA_RESTART
-      action.sa_sigaction = LibC::SigactionHandlerT.new do |_, _, _|
-        print_runtime_status(SchedulerTrace.details_on_signal)
-      end
+
+      # we can't pass a closure to a C function, so we use different handlers:
+      action.sa_sigaction =
+        if details
+          LibC::SigactionHandlerT.new { |_, _, _| print_runtime_status(details: true) }
+        else
+          LibC::SigactionHandlerT.new { |_, _, _| print_runtime_status(details: false) }
+        end
+
       LibC.sigemptyset(pointerof(action.@sa_mask))
       LibC.sigaction(signal, pointerof(action), nil)
     end
   {% end %}
 
-  # Starts a thread that will call `.print_runtime_status` every *time* until
-  # the program terminates.
-  def self.every(time : Time::Span, details = false) : Nil
-    Thread.new("PerfToolsSched") do
+  # Starts a thread that will call `.print_runtime_status` on every *interval*
+  # until the program terminates.
+  #
+  # Set *details* to true to print individual fiber details.
+  def self.every(interval : Time::Span, details = false) : Nil
+    Thread.new("PERFTOOLSSCHED") do
       loop do
-        Thread.sleep(time)
+        Thread.sleep(interval)
         print_runtime_status(details)
       end
     end
   end
 
-  # Stops the world, prints the status of all runtime schedulers, then resumes
-  # the world.
+  # Stops the world, prints the status of all runtime schedulers to the standard
+  # error, then resumes the world.
   #
   # Set `details` to true to print individual fiber details.
   def self.print_runtime_status(details = false) : Nil
@@ -101,7 +97,10 @@ module PerfTools::SchedulerTrace
   end
 
   private def self.print_runtime_status(execution_context : Fiber::ExecutionContext::Isolated, details = false) : Nil
-    Crystal::System.print_error("%s name=%s\n", execution_context.class.name, execution_context.name)
+    Crystal::System.print_error("%s name=%s\n",
+      execution_context.class.name,
+      execution_context.name)
+
     print_runtime_status(execution_context.@thread, details = false)
   end
 
@@ -143,7 +142,4 @@ module PerfTools::SchedulerTrace
   private def self.print_runtime_status(fiber : Fiber) : Nil
     Crystal::System.print_error("  Fiber %p name=%s status=%s\n", fiber.as(Void*), fiber.name, fiber.status.to_s)
   end
-
-  # private def self.print_runtime_status(arg : Nil, details = false) : Nil
-  # end
 end
