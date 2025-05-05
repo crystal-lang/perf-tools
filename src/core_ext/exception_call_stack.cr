@@ -2,7 +2,7 @@ struct Exception::CallStack
   def initialize(*, __callstack @callstack : Array(Void*))
   end
 
-  {% unless @type.class.has_method?(:decode_backtrace_frame) %} # Crystal < 1.16.0
+  {% unless @type.class.has_method?(:decode_backtrace_frame) %} # Crystal < 1.17.0
     # :nodoc:
     def self.decode_backtrace_frame(ip, show_full_info) : String?
       pc = decode_address(ip)
