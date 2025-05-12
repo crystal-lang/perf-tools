@@ -73,9 +73,9 @@ module PerfTools::SchedulerTrace
     return unless details
 
     Fiber.unsafe_each do |fiber|
-      if fiber.execution_context? == execution_context
-        print_runtime_status(fiber)
-      end
+      next unless fiber.execution_context? == execution_context
+      next if execution_context.@threads.any? { |thread| thread.current_fiber? == fiber }
+      print_runtime_status(fiber)
     end
   end
 
@@ -90,9 +90,9 @@ module PerfTools::SchedulerTrace
     return unless details
 
     Fiber.unsafe_each do |fiber|
-      if fiber.execution_context? == execution_context
-        print_runtime_status(fiber)
-      end
+      next unless fiber.execution_context? == execution_context
+      next if execution_context.@thread.current_fiber? == fiber
+      print_runtime_status(fiber)
     end
   end
 
