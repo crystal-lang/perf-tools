@@ -36,7 +36,7 @@ module PerfTools::SchedulerTrace
   #
   # Set *details* to true to print individual fiber details.
   def self.every(interval : Time::Span, details = false) : Nil
-    Thread.new("PERFTOOLSSCHED") do
+    Thread.new("PERF-TOOLS") do
       loop do
         Thread.sleep(interval)
         print_runtime_status(details)
