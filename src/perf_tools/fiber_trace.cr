@@ -184,7 +184,6 @@ module PerfTools::FiberTrace
   # returns an empty slice if array is nil.
   def self.stack_array_to_slice(stack, skip)
     if stack
-      skip = PerfTools::FiberTrace::STACK_SKIP_YIELD
       Slice.new(stack.to_unsafe + skip, stack.size - skip)
     else
       Slice.new(Pointer(Void*).null, 0)
