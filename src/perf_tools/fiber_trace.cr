@@ -2,15 +2,6 @@ require "./common"
 
 # In-memory tracking of all existing fibers in the running program.
 module PerfTools::FiberTrace
-  # :nodoc:
-  class_getter spawn_stack = {} of Fiber => Array(Void*)
-
-  # :nodoc:
-  class_getter yield_stack = {} of Fiber => Array(Void*)
-
-  # :nodoc:
-  class_getter lock = Thread::Mutex.new
-
   {% begin %}
     # The maximum number of stack frames shown for `FiberTrace.log_fibers` and
     # `FiberTrace.pretty_log_fibers`.
@@ -96,26 +87,22 @@ module PerfTools::FiberTrace
   # src/perf_tools/fiber_trace.cr:184:3 in 'run'
   # /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/fiber.cr:98:34 in '->'
   # ```
-  #
-  # NOTE: The main fiber of each thread is not shown.
   def self.log_fibers(io : IO) : Nil
-    lock.synchronize do
-      io << spawn_stack.size << '\n'
-      spawn_stack.each do |fiber, stack|
-        io << fiber.name << '\n'
+    fibers = [] of Fiber
+    Fiber.each { |fiber| fibers << fiber }
 
-        s = Exception::CallStack.new(__callstack: stack).printable_backtrace
-        io << s.size << '\n'
-        s.each { |frame| io << frame << '\n' }
+    io << fibers.size << '\n'
 
-        if yield_stack = self.yield_stack[fiber]?
-          y = Exception::CallStack.new(__callstack: yield_stack).printable_backtrace
-          io << y.size << '\n'
-          y.each { |frame| io << frame << '\n' }
-        else
-          io << '0' << '\n'
-        end
-      end
+    fibers.each do |fiber|
+      io << fiber.name << '\n'
+
+      s = PerfTools.decode_backtrace(fiber.__spawn_stack)
+      io << s.size << '\n'
+      s.each { |frame| io << frame << '\n' }
+
+      y = PerfTools.decode_backtrace(fiber.__yield_stack)
+      io << y.size << '\n'
+      y.each { |frame| io << frame << '\n' }
     end
   end
 
@@ -142,55 +129,78 @@ module PerfTools::FiberTrace
   # | 1 |  | ` test.cr:4:1 in '__crystal_main' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:129:5 in 'main_user_code' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:115:7 in 'main' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:141:3 in 'main' ` | ` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/scheduler.cr:50:5 in 'reschedule' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/concurrent.cr:29:3 in 'sleep' `<br>` test.cr:3:9 in '->' `<br>` /Users/quinton/crystal/perf-tools/src/perf_tools/fiber_trace.cr:172:3 in 'run' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/fiber.cr:98:34 in '->' ` |
   # | 1 | ` Signal Loop ` | ` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/signal.cr:60:5 in 'start_loop' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/signal.cr:163:5 in 'setup_default_handlers' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/kernel.cr:558:1 in '__crystal_main' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:129:5 in 'main_user_code' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:115:7 in 'main' ` | ` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/scheduler.cr:50:5 in 'reschedule' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/evented.cr:128:5 in 'wait_readable' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/evented.cr:119:3 in 'wait_readable' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/evented.cr:59:9 in 'unbuffered_read' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/buffered.cr:261:5 in 'fill_buffer' ` |
   # ```
-  #
-  # NOTE: The main fiber of each thread is not shown.
   def self.pretty_log_fibers(io : IO) : Nil
-    lock.synchronize do
-      uniqs = spawn_stack
-        .map { |fiber, stack| {fiber.name, stack, yield_stack[fiber]?} }
-        .group_by { |_, s, y| {s, y} }
-        .transform_values(&.map { |fiber, _, _| fiber })
-        .to_a
-        .sort_by! { |(s, y), names| {-names.size, s, y || Array(Void*).new} }
+    fibers = [] of Fiber
+    Fiber.each { |fiber| fibers << fiber }
 
-      io.puts "| Count | Fibers | Spawn stack | Yield stack |"
-      io.puts "|------:|:-------|:------------|:------------|"
-      uniqs.each do |(s, y), names|
-        s = Exception::CallStack.new(__callstack: s).printable_backtrace
-        y = y.try { |y| Exception::CallStack.new(__callstack: y).printable_backtrace }
+    uniqs = fibers
+      .map { |fiber| {fiber.name, fiber.__spawn_stack, fiber.__yield_stack} }
+      .group_by { |_, s, y| {s, y} }
+      .transform_values(&.map { |fiber, _, _| fiber })
+      .to_a
+      .sort_by! { |(s, y), names| {-names.size, s, y} }
 
-        io << "| "
-        io << names.size
-        io << " | "
-        names.compact.join(io, ' ') { |name| PerfTools.md_code_span(io, name) }
-        io << " | "
-        s.join(io, "<br>") { |frame| PerfTools.md_code_span(io, frame) }
-        io << " | "
-        if y
-          y.join(io, "<br>") { |frame| PerfTools.md_code_span(io, frame) }
-        else
-          io << "*N/A*"
-        end
-        io << " |\n"
+    io.puts "| Count | Fibers | Spawn stack | Yield stack |"
+    io.puts "|------:|:-------|:------------|:------------|"
+    uniqs.each do |(s, y), names|
+      io << "| "
+      io << names.size
+      io << " | "
+      names.compact.join(io, ' ') { |name| PerfTools.md_code_span(io, name) }
+      io << " | "
+      PerfTools.decode_backtrace(s).join(io, "<br>") do |frame|
+        PerfTools.md_code_span(io, frame)
       end
+      io << " | "
+      if y.size > 0
+        PerfTools.decode_backtrace(y).join(io, "<br>") do |frame|
+          PerfTools.md_code_span(io, frame)
+        end
+      else
+        io << "*N/A*"
+      end
+      io << " |\n"
     end
   end
 
   # :nodoc:
-  macro track_fiber(action, current_fiber)
-    %stack = Array.new(PerfTools::FiberTrace::STACK_DEPTH + PerfTools::FiberTrace::STACK_SKIP_{{action.upcase.id}}, Pointer(Void).null)
-    Exception::CallStack.unwind_to(Slice.new(%stack.to_unsafe, %stack.size))
-    %stack.truncate(PerfTools::FiberTrace::STACK_SKIP_{{action.upcase.id}}..)
-    while %stack.last? == Pointer(Void).null
-      %stack.pop
+  def self.caller_stack(skip, depth = PerfTools::FiberTrace::STACK_DEPTH)
+    size = skip + depth
+
+    stack = Array(Void*).new(size, Pointer(Void).null)
+    slice = Slice(Void*).new(stack.to_unsafe, size)
+    PerfTools.unwind_to(slice)
+
+    while stack.last?.try(&.null?)
+      stack.pop
     end
-    PerfTools::FiberTrace.lock.synchronize do
-      PerfTools::FiberTrace.{{action.id}}_stack[{{current_fiber}}] = %stack
+
+    stack
+  end
+
+  # :nodoc:
+  #
+  # returns a slice view into the stack array, avoids allocating a new array,
+  # returns an empty slice if array is nil.
+  def self.stack_array_to_slice(stack, skip)
+    if stack
+      Slice.new(stack.to_unsafe + skip, stack.size - skip)
+    else
+      Slice.new(Pointer(Void*).null, 0)
     end
   end
 end
 
 class Fiber
+  # the stacks could be saved as slices instead of arrays but then we'd have two
+  # writes to write the slice pointer and the slice size instead of a single
+  # pointer write for the array (the buffer pointer and size are on the array
+  # object); we could always allocate slices of DEPTH+SKIP size but we hit
+  # recursion issues with crystal/once (fiber.current -> access constant ->
+  # crystal/once -> fiber.current)
+  @__spawn_stack : Array(Void*)?
+  @__yield_stack : Array(Void*)?
+
   {% begin %}
   def initialize(
     name : String?,
@@ -198,64 +208,32 @@ class Fiber
     {% if flag?(:execution_context) %}execution_context : ExecutionContext = ExecutionContext.current,{% end %}
     &proc : ->
   )
+    @__spawn_stack = PerfTools::FiberTrace.caller_stack(PerfTools::FiberTrace::STACK_SKIP_SPAWN)
     previous_def(
       name,
       {% if Fiber.has_constant?(:Stack) %}stack,{% end %}
       {% if flag?(:execution_context) %}execution_context,{% end %}
       &proc
     )
-    PerfTools::FiberTrace.track_fiber(:spawn, self)
   end
   {% end %}
 
-  def self.inactive(fiber : Fiber)
-    PerfTools::FiberTrace.lock.synchronize do
-      PerfTools::FiberTrace.spawn_stack.delete(fiber)
-      PerfTools::FiberTrace.yield_stack.delete(fiber)
-    end
-    previous_def
+  def __spawn_stack : Slice(Void*)
+    PerfTools::FiberTrace.stack_array_to_slice(@__spawn_stack, PerfTools::FiberTrace::STACK_SKIP_SPAWN)
   end
 
-  # crystal-lang/crystal#13701
-  {% unless Fiber.class.has_method?(:inactive) %} # Crystal < 1.10.0
-    def run
-      GC.unlock_read
-      @proc.call
-    rescue ex
-      if name = @name
-        STDERR.print "Unhandled exception in spawn(name: #{name}): "
-      else
-        STDERR.print "Unhandled exception in spawn: "
-      end
-      ex.inspect_with_backtrace(STDERR)
-      STDERR.flush
-    ensure
-      {% if flag?(:preview_mt) %}
-        Crystal::Scheduler.enqueue_free_stack @stack
-      {% elsif flag?(:interpreted) %}
-        # For interpreted mode we don't need a new stack, the stack is held by the interpreter
-      {% else %}
-        Fiber.stack_pool.release(@stack)
-      {% end %}
+  def __yield_stack : Slice(Void*)
+    PerfTools::FiberTrace.stack_array_to_slice(@__yield_stack, PerfTools::FiberTrace::STACK_SKIP_YIELD)
+  end
 
-      # Remove the current fiber from the linked list
-      Fiber.inactive(self)
-
-      # Delete the resume event if it was used by `yield` or `sleep`
-      @resume_event.try &.free
-      @timeout_event.try &.free
-      @timeout_select_action = nil
-
-      @alive = false
-      Crystal::Scheduler.reschedule
-    end
-  {% end %}
+  def __yield_stack=(@__yield_stack)
+  end
 end
 
 {% if flag?(:execution_context) %}
   module Fiber::ExecutionContext::Scheduler
     def swapcontext(fiber : Fiber)
-      PerfTools::FiberTrace.track_fiber(:yield, Fiber.current)
+      Fiber.current.__yield_stack = PerfTools::FiberTrace.caller_stack(PerfTools::FiberTrace::STACK_SKIP_YIELD)
       previous_def(fiber)
     end
   end
@@ -268,7 +246,7 @@ end
                       \{% else %}
                         @current
                       \{% end %}
-      PerfTools::FiberTrace.track_fiber(:yield, current_fiber)
+      current_fiber.__yield_stack = PerfTools::FiberTrace.caller_stack(PerfTools::FiberTrace::STACK_SKIP_YIELD)
       previous_def
     end
   end
