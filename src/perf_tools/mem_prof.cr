@@ -1,4 +1,5 @@
 require "./common"
+require "../core_ext/gc/boehm"
 
 # A simple in-memory memory profiler that tracks all allocations and
 # deallocations by the garbage-collecting allocator.
@@ -648,13 +649,6 @@ module PerfTools::MemProf
   end
 
   init
-end
-
-lib LibGC
-  GC_I_PTRFREE = 0
-  GC_I_NORMAL  = 1
-
-  fun register_disclaim_proc = GC_register_disclaim_proc(kind : Int, proc : Void* -> Int, mark_from_all : Int)
 end
 
 module GC
