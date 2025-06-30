@@ -22,6 +22,7 @@ module GC
   #
   # The *block* must not allocate memory using the GC.
   def self.each_reachable_object(&block : Void*, UInt64 ->) : Nil
+    Thread.stop_world
     GC.lock_write
     begin
       LibGC.enumerate_reachable_objects_inner(LibGC::ReachableObjectFunc.new do |obj, bytes, client_data|
@@ -30,6 +31,7 @@ module GC
       end, pointerof(block))
     ensure
       GC.unlock_write
+      Thread.start_world
     end
   end
 end
