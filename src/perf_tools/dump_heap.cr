@@ -20,7 +20,7 @@ module PerfTools::DumpHeap
   # * The byte size of the allocation. This may be larger than the size
   #   originally passed to `GC.malloc` or a similar method, as the GC may
   #   reserve trailing padding bytes for alignment. Additionally, for an atomic
-  #   allocation, the the most significant bit of this field is set as well.
+  #   allocation, the most significant bit of this field is set as well.
   # * The pointer-sized word at the start of the allocation. If this allocation
   #   corresponds to an instance of a Crystal reference type, the lower bytes
   #   will contain that type's ID.
