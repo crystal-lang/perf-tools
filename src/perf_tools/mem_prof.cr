@@ -1,5 +1,5 @@
 require "./common"
-require "../core_ext/gc/boehm"
+require "../core_ext/gc"
 
 # A simple in-memory memory profiler that tracks all allocations and
 # deallocations by the garbage-collecting allocator.

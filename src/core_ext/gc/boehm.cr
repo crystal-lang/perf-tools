@@ -14,11 +14,7 @@ end
 module GC
   # Returns whether *ptr* is a pointer to the base of an atomic allocation.
   def self.atomic?(ptr : Pointer) : Bool
-    {% if flag?(:gc_none) %}
-      false
-    {% else %}
-      LibGC.get_kind_and_size(ptr, nil) == LibGC::GC_I_PTRFREE
-    {% end %}
+    LibGC.get_kind_and_size(ptr, nil) == LibGC::GC_I_PTRFREE
   end
 
   # Walks the entire GC heap, yielding each allocation's base address and size
@@ -26,20 +22,14 @@ module GC
   #
   # The *block* must not allocate memory using the GC.
   def self.each_reachable_object(&block : Void*, UInt64 ->) : Nil
-    # FIXME: this is necessary to bring `block` in scope until
-    # crystal-lang/crystal#15940 is resolved
-    typeof(block)
-
-    {% unless flag?(:gc_none) %}
-      GC.lock_write
-      begin
-        LibGC.enumerate_reachable_objects_inner(LibGC::ReachableObjectFunc.new do |obj, bytes, client_data|
-          fn = client_data.as(typeof(pointerof(block))).value
-          fn.call(obj, bytes.to_u64!)
-        end, pointerof(block))
-      ensure
-        GC.unlock_write
-      end
-    {% end %}
+    GC.lock_write
+    begin
+      LibGC.enumerate_reachable_objects_inner(LibGC::ReachableObjectFunc.new do |obj, bytes, client_data|
+        fn = client_data.as(typeof(pointerof(block))).value
+        fn.call(obj, bytes.to_u64!)
+      end, pointerof(block))
+    ensure
+      GC.unlock_write
+    end
   end
 end

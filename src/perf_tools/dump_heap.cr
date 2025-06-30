@@ -1,5 +1,5 @@
 require "./common"
-require "../core_ext/gc/boehm"
+require "../core_ext/gc"
 
 # Functions to produce binary dumps of the running process's GC heap, useful for
 # out-of-memory analysis.
