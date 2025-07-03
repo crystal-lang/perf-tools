@@ -12,9 +12,10 @@ module PerfTools::DumpHeap
   # All writes to *io* must not allocate memory using the GC. For `IO::Buffered`
   # this can be achieved by disabling write buffering (`io.sync = true`).
   #
-  # The binary dump consists of a sequential list of allocation records. Each
-  # record contains the following fields, all 64-bit little-endian integers,
-  # unless otherwise noted:
+  # The binary dump begins with the 8-byte header `"GCGRPH\x01\x00"`, then it is
+  # followed by a sequential list of allocation records. Each record contains
+  # the following fields, all 64-bit little-endian integers, unless otherwise
+  # noted:
   #
   # * The base address of the allocation.
   # * The byte size of the allocation. This may be larger than the size
@@ -32,6 +33,8 @@ module PerfTools::DumpHeap
   # All the records are then terminated by a single `UInt64::MAX` field.
   def self.graph(io : IO) : Nil
     GC.collect
+
+    io << "GCGRPH\x01\x00"
 
     GC.each_reachable_object do |obj, bytes|
       is_atomic = GC.atomic?(obj)
@@ -64,9 +67,10 @@ module PerfTools::DumpHeap
   # All writes to *io* must not allocate memory using the GC. For `IO::Buffered`
   # this can be achieved by disabling write buffering (`io.sync = true`).
   #
-  # The binary dump consists of a sequential list of allocation records. Each
-  # record contains the following fields, all 64-bit little-endian integers,
-  # unless otherwise noted:
+  # The binary dump begins with the 8-byte header `"GCFULL\x01\x00"`, then it is
+  # followed by a sequential list of allocation records. Each record contains
+  # the following fields, all 64-bit little-endian integers, unless otherwise
+  # noted:
   #
   # * The base address of the allocation.
   # * The byte size of the allocation. This may be larger than the size
@@ -78,6 +82,8 @@ module PerfTools::DumpHeap
   # All the records are then terminated by a single `UInt64::MAX` field.
   def self.full(io : IO) : Nil
     GC.collect
+
+    io << "GCFULL\x01\x00"
 
     GC.each_reachable_object do |obj, bytes|
       io.write_bytes(obj.address.to_u64!)
