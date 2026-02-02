@@ -60,7 +60,7 @@ module PerfTools::SchedulerTrace
     Thread.start_world
   end
 
-  private def self.print_runtime_status(execution_context : Fiber::ExecutionContext::MultiThreaded, details = false) : Nil
+  private def self.print_runtime_status(execution_context : Fiber::ExecutionContext::Parallel, details = false) : Nil
     Crystal::System.print_error("%s name=%s global_queue.size=%d\n",
       execution_context.class.name,
       execution_context.name,
@@ -75,23 +75,6 @@ module PerfTools::SchedulerTrace
     Fiber.unsafe_each do |fiber|
       next unless fiber.execution_context? == execution_context
       next if execution_context.@threads.any? { |thread| thread.current_fiber? == fiber }
-      print_runtime_status(fiber)
-    end
-  end
-
-  private def self.print_runtime_status(execution_context : Fiber::ExecutionContext::SingleThreaded, details = false) : Nil
-    Crystal::System.print_error("%s name=%s global_queue.size=%d\n",
-      execution_context.class.name,
-      execution_context.name,
-      execution_context.@global_queue.size)
-
-    print_runtime_status(execution_context.@thread, details)
-
-    return unless details
-
-    Fiber.unsafe_each do |fiber|
-      next unless fiber.execution_context? == execution_context
-      next if execution_context.@thread.current_fiber? == fiber
       print_runtime_status(fiber)
     end
   end
@@ -113,13 +96,7 @@ module PerfTools::SchedulerTrace
       {% end %}
 
     case scheduler = thread.scheduler?
-    when Fiber::ExecutionContext::MultiThreaded::Scheduler
-      Crystal::System.print_error("  Scheduler name=%s thread=%p local_queue.size=%u status=%s\n",
-        scheduler.name,
-        thread_handle,
-        scheduler.@runnables.size,
-        scheduler.status)
-    when Fiber::ExecutionContext::SingleThreaded
+    when Fiber::ExecutionContext::Parallel::Scheduler
       Crystal::System.print_error("  Scheduler name=%s thread=%p local_queue.size=%u status=%s\n",
         scheduler.name,
         thread_handle,
