@@ -130,15 +130,13 @@ module PerfTools::FiberTrace
   # | 1 | ` Signal Loop ` | ` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/signal.cr:60:5 in 'start_loop' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/system/unix/signal.cr:163:5 in 'setup_default_handlers' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/kernel.cr:558:1 in '__crystal_main' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:129:5 in 'main_user_code' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/main.cr:115:7 in 'main' ` | ` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/crystal/scheduler.cr:50:5 in 'reschedule' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/evented.cr:128:5 in 'wait_readable' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/evented.cr:119:3 in 'wait_readable' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/evented.cr:59:9 in 'unbuffered_read' `<br>` /opt/homebrew/Cellar/crystal/1.9.2/share/crystal/src/io/buffered.cr:261:5 in 'fill_buffer' ` |
   # ```
   def self.pretty_log_fibers(io : IO) : Nil
-    fibers = [] of Fiber
-    Fiber.each { |fiber| fibers << fiber }
-
-    uniqs = fibers
-      .map { |fiber| {fiber.name, fiber.__spawn_stack, fiber.__yield_stack} }
-      .group_by { |_, s, y| {s, y} }
-      .transform_values(&.map { |fiber, _, _| fiber })
-      .to_a
-      .sort_by! { |(s, y), names| {-names.size, s, y} }
+    fibers = Hash({Slice(Void*), Slice(Void*)}, Array(String)).new do |hash, key|
+      hash[key] = [] of String
+    end
+    Fiber.each do |fiber|
+      fibers[{fiber.__spawn_stack, fiber.__yield_stack}] << fiber.name.to_s
+    end
+    uniqs = fibers.to_a.sort_by! { |(s, y), names| {-names.size, s, y} }
 
     io.puts "| Count | Fibers | Spawn stack | Yield stack |"
     io.puts "|------:|:-------|:------------|:------------|"
