@@ -12,6 +12,8 @@ module PerfTools::SchedulerTrace
     #
     # Set *details* to false to skip individual fiber details.
     def self.on(signal : Signal, details : Bool = true) : Nil
+      load_debug_info if details
+
       # not using Signal#trap so the signal will be handled directly instead
       # of through the event loop that may have to wait (or be blocked in
       # the worst case):
@@ -36,11 +38,21 @@ module PerfTools::SchedulerTrace
   #
   # Set *details* to true to print individual fiber details.
   def self.every(interval : Time::Span, details = false) : Nil
+    load_debug_info if details
+
     Thread.new("PERF-TOOLS") do
       loop do
         Thread.sleep(interval)
         print_runtime_status(details)
       end
+    end
+  end
+
+  @[NoInline]
+  private def self.load_debug_info
+    if Fiber.current.responds_to?(:__yield_stack)
+      # load debug info + initialize globals (may need to allocate)
+      caller
     end
   end
 
@@ -108,6 +120,15 @@ module PerfTools::SchedulerTrace
 
   private def self.print_runtime_status(fiber : Fiber) : Nil
     Crystal::System.print_error("  Fiber %p name=%s status=%s\n", fiber.as(Void*), fiber.name, fiber.status.to_s)
+
+    return unless fiber.responds_to?(:__yield_stack)
+    return if fiber.status == "running"
+
+    fiber.__yield_stack.each do |ip|
+      Crystal::System.print_error("    ")
+      Exception::CallStack.__perftools_print_frame_location(ip)
+      Crystal::System.print_error("\n")
+    end
   end
 
   private def self.thread_handle(scheduler)
