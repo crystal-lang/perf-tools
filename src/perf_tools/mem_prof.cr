@@ -156,7 +156,7 @@ module PerfTools::MemProf
         type_id, @@last_type_id = @@last_type_id, 0
 
         stack = StaticArray(Void*, STACK_TOTAL).new(Pointer(Void).null)
-        Exception::CallStack.unwind_to(stack.to_slice)
+        PerfTools.unwind_to(stack.to_slice)
         key = StaticArray(UInt64, STACK_DEPTH).new { |i| stack.unsafe_fetch(STACK_SKIP &+ i).address }
         alloc_infos[ptr.address] = AllocInfo.new(size, key, type_id, atomic)
         unless type_id == 0
