@@ -1,6 +1,12 @@
 require "./common"
 require "../core_ext/fiber"
 
+# Print the current runtime status of execution contexts, their schedulers, down
+# to their individual fibers. If the `FiberTrace` module has also been loaded,
+# the yield stack of suspended fibers is also printed.
+#
+# This module only impacts the performance of the program when printing the
+# runtime status.
 module PerfTools::SchedulerTrace
   {% if flag?(:unix) %}
     # Installs a signal handler to call `.print_runtime_status` on demand.
@@ -10,7 +16,8 @@ module PerfTools::SchedulerTrace
     # `GC.sig_suspend` and `GC.sig_resume`) that uses different signals
     # depending on the target and configuration.
     #
-    # Set *details* to false to skip individual fiber details.
+    # Set *details* to true to print individual fiber details, and the yield
+    # stack of suspended fibers if `FiberTrace` has also been required.
     def self.on(signal : Signal, details : Bool = true) : Nil
       load_debug_info if details
 
@@ -36,7 +43,8 @@ module PerfTools::SchedulerTrace
   # Starts a thread that will call `.print_runtime_status` on every *interval*
   # until the program terminates.
   #
-  # Set *details* to true to print individual fiber details.
+  # Set *details* to true to print individual fiber details, and the yield stack
+  # of suspended fibers if `FiberTrace` has also been required.
   def self.every(interval : Time::Span, details = false) : Nil
     load_debug_info if details
 
@@ -48,8 +56,12 @@ module PerfTools::SchedulerTrace
     end
   end
 
+  @@load_debug_info = Atomic(Bool).new(false)
+
   @[NoInline]
   private def self.load_debug_info
+    return if @@load_debug_info.swap(true, :relaxed)
+
     if Fiber.current.responds_to?(:__yield_stack)
       # load debug info + initialize globals (may need to allocate)
       caller
@@ -59,8 +71,10 @@ module PerfTools::SchedulerTrace
   # Stops the world, prints the status of all runtime schedulers to the standard
   # error, then resumes the world.
   #
-  # Set `details` to true to print individual fiber details.
+  # Set *details* to true to print individual fiber details, and the yield stack
+  # of suspended fibers if `FiberTrace` has also been required.
   def self.print_runtime_status(details = false) : Nil
+    load_debug_info if details
     Thread.stop_world
 
     Crystal::System.print_error("sched.details time=%u\n", Crystal::System::Time.ticks)

@@ -25,6 +25,25 @@ PerfTools::FiberTrace.log_fibers(STDOUT)
 PerfTools::FiberTrace.pretty_log_fibers(STDOUT)
 ```
 
+To print the runtime status of execution contexts and fibers:
+
+```crystal
+require "perf_tools/scheduler_trace"
+
+PerfTools::SchedulerTrace.print_runtime_status
+PerfTools::SchedulerTrace.every(5.seconds)
+PerfTools::SchedulerTrace.on(Signal::USR1, details: true)
+```
+
+And for a full runtime status, with the yield stack of suspended fibers:
+
+```crystal
+require "perf_tools/fiber_trace"
+require "perf_tools/scheduler_trace"
+
+PerfTools::SchedulerTrace.print_runtime_status(details: true)
+```
+
 Check each tool's instructions for more information.
 
 ## Installation
