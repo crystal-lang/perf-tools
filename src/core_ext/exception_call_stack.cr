@@ -2,6 +2,11 @@ struct Exception::CallStack
   def initialize(*, __callstack @callstack : Array(Void*))
   end
 
+  # :nodoc:
+  def self.__perftools_print_frame_location(ip : Void*)
+    print_frame_location RepeatedFrame.new(ip)
+  end
+
   {% unless @type.class.has_method?(:decode_backtrace_frame) %} # Crystal < 1.17.0
     # :nodoc:
     def self.decode_backtrace_frame(ip, show_full_info) : String?
