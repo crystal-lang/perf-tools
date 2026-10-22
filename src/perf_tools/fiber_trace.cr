@@ -203,14 +203,14 @@ class Fiber
   def initialize(
     name : String?,
     {% if Fiber.has_constant?(:Stack) %}stack : Stack,{% end %}
-    {% if flag?(:execution_context) %}execution_context : ExecutionContext = ExecutionContext.current,{% end %}
+    {% if !flag?(:without_mt) && !flag?(:preview_mt) || flag?(:execution_context) %}execution_context : ExecutionContext = ExecutionContext.current,{% end %}
     &proc : ->
   )
     @__spawn_stack = PerfTools::FiberTrace.caller_stack(PerfTools::FiberTrace::STACK_SKIP_SPAWN)
     previous_def(
       name,
       {% if Fiber.has_constant?(:Stack) %}stack,{% end %}
-      {% if flag?(:execution_context) %}execution_context,{% end %}
+      {% if !flag?(:without_mt) && !flag?(:preview_mt) || flag?(:execution_context) %}execution_context,{% end %}
       &proc
     )
   end
@@ -228,7 +228,7 @@ class Fiber
   end
 end
 
-{% if flag?(:execution_context) %}
+{% if !flag?(:without_mt) && !flag?(:preview_mt) || flag?(:execution_context) %}
   module Fiber::ExecutionContext::Scheduler
     def swapcontext(fiber : Fiber)
       Fiber.current.__yield_stack = PerfTools::FiberTrace.caller_stack(PerfTools::FiberTrace::STACK_SKIP_YIELD)
